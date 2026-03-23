@@ -22,19 +22,26 @@ def get_weather(location: str) -> dict:
         return {"temperature": "14°C", "condition": "partly cloudy"}
     return {"temperature": "unknown", "condition": "unknown"}
 
+def _run(name, args) -> dict:
+    """
+    Return the output of named command as a string.
+    """
+    try:
+        output = subprocess.check_output(
+            args,
+            cwd=os.getcwd(),          # optional: restrict to current dir
+            stderr=subprocess.STDOUT, # capture errors too
+            text=True                 # returns str instead of bytes
+        )
+        return {name: output.strip()}
+    except Exception as e:
+        return {name: f"Error: {e}"}
+
+
 @tool
 def get_git_status() -> dict:
     """
     Return the output of `git status` as a string.
     """
-    try:
-        output = subprocess.check_output(
-            ["git", "status"],
-            cwd=os.getcwd(),          # optional: restrict to current dir
-            stderr=subprocess.STDOUT, # capture errors too
-            text=True                 # returns str instead of bytes
-        )
-        return {"git_status": output.strip()}
-    except Exception as e:
-        return {"git_status": f"Error: {e}"}
+    return _run('git_status', ['git', 'status'])
 

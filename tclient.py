@@ -64,7 +64,7 @@ def execute_tool(name: str, arguments: dict):
 # ------------------------------------------------------------
 def main(prompt):
     messages = [
-        {"role": "user", "content": prompt},
+        {"role": "user", "content": f"Answer briefly using tools:\n{prompt}"},
     ]
 
     TOTAL_ITERATIONS = 10
@@ -103,4 +103,4 @@ def main(prompt):
             break
 
 if __name__ == "__main__":
-    main(' '.join(sys.argv[1:]) or "What's the weather like in Paris?")
+    main(' '.join(sys.argv[1:]) or "Answer briefly: What's the weather like in Paris?")
