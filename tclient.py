@@ -104,4 +104,3 @@ def main(prompt):
 
 if __name__ == "__main__":
     main(' '.join(sys.argv[1:]) or "What's the weather like in Paris?")
-
