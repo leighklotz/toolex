@@ -26,7 +26,8 @@ tools = [
 
 
 def execute_tool(name, arguments):
-    # stub that does not actually call a function
+    # stub that does not actually call a function<<<<<<< /tmp/emacs-diff-before-pExeML
+
     if name == "get_weather":
         return {"temperature": "14°C", "condition": "partly cloudy"}
     return {"error": f"Unknown tool: {name}"}
