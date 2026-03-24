@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # ---------------------------------------------------------------------------
 # Small decorator that marks a function as a tool by setting an attribute.
@@ -34,7 +34,7 @@ def tool(func):
 # Helper to run a command and return its output (or a short error string).
 # ---------------------------------------------------------------------------
 
-def _run(name: str, args: List[str], more_args: List[str] | None = None) -> Dict[str, str]:
+def _run(name: str, cmd: List[str], args: str) -> Dict[str, str]:
     """
     Run a command and return its standard output as a string.
 
@@ -42,12 +42,15 @@ def _run(name: str, args: List[str], more_args: List[str] | None = None) -> Dict
     ----------
     name:
         Logical name of the command – used as the key in the returned dict.
-    args:
+    cmd:
         Base command split into individual elements.
-    more_args:
-        Optional additional arguments to be appended to ``args``.
+    args:
+        Optional space-separated additional arguments to be appended to `cmd`.
     """
-    cmd = args + (more_args or [])
+
+    args = args.strip()
+    if args:
+        cmd = cmd + args.split(' ')
     try:
         output = subprocess.check_output(
             cmd,
@@ -77,15 +80,15 @@ def get_weather(location: str) -> Dict[str, str]:
 
 
 @tool
-def get_git_status(args: List[str] | None = None) -> Dict[str, str]:
+def get_git_status(args: Optional[str] = '') -> Dict[str, str]:
     """Return the output of ``git status`` (optionally with extra args)."""
-    return _run("git_status", ["git", "status"], list(args or []))
+    return _run("git_status", ["git", "status"], args)
 
 
 @tool
-def get_git_diff(args: List[str] | None = None) -> Dict[str, str]:
+def get_git_diff(args: Optional[str] = '') -> Dict[str, str]:
     """Return the output of ``git diff`` (optionally with extra args)."""
-    return _run("git_diff", ["git", "diff"], list(args or []))
+    return _run("git_diff", ["git", "diff"], args)
 
 
 @tool
