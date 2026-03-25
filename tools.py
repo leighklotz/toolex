@@ -1,13 +1,5 @@
 #!/usr/bin/env python
-"""
-Command‑line tools for simple git interaction and other utilities.
-
-- ``tool`` – very small decorator that tags functions as tools.
-- ``get_weather`` – stub that returns a hard‑coded weather description.
-- ``get_git_status`` – returns the plain output of ``git status``.
-- ``get_git_diff`` – returns the plain output of ``git diff`` with optional
-  arguments.
-"""
+"""Command‑line utilities for simple git interaction and other helpers."""
 
 from __future__ import annotations
 
@@ -16,25 +8,22 @@ import sys
 import subprocess
 from typing import Dict, List, Optional
 
-# ---------------------------------------------------------------------------
-# Decorator that marks a function as a tool by setting an attribute.
-# ---------------------------------------------------------------------------
-
+# ----------------------------------------------------------------------
+# Decorator that marks a function as a tool
+# ----------------------------------------------------------------------
 def tool(func):
-    """Decorator that tags a function as a tool.
+    """Tag a function as a `toolex` tool.
 
-    The decorator simply sets ``_is_toolex_tool = True`` on the function so
-    that the runtime can detect it.
+    The decorator simply sets ``_is_toolex_tool = True`` on the function
+    so that the runtime can detect it.
     """
     func._is_toolex_tool = True
     return func
 
-
-# ---------------------------------------------------------------------------
-# Helper to run a command and return its output (or a short error string).
-# ---------------------------------------------------------------------------
-
-def _run(name: str, cmd: List[str], args: str) -> Dict[str, str]:
+# ----------------------------------------------------------------------
+# Helper to run a command and return its output (or a short error string)
+# ----------------------------------------------------------------------
+def run_tool(name: str, cmd: List[str], args: str) -> Dict[str, str]:
     """
     Run a command and return its standard output as a string.
 
@@ -45,9 +34,8 @@ def _run(name: str, cmd: List[str], args: str) -> Dict[str, str]:
     cmd:
         Base command split into individual elements.
     args:
-        Optional space-separated additional arguments to be appended to `cmd`.
+        Optional space‑separated additional arguments to be appended to `cmd`.
     """
-
     if args:
         args = args.strip()
     if args:
@@ -65,41 +53,3 @@ def _run(name: str, cmd: List[str], args: str) -> Dict[str, str]:
         return {name: f"Error: {exc}"}
     except Exception as exc:  # pragma: no cover
         return {name: f"Unknown error: {exc}"}
-
-
-# ---------------------------------------------------------------------------
-# Public tools
-# ---------------------------------------------------------------------------
-
-@tool
-def get_weather(location: str) -> Dict[str, str]:
-    """Return a dummy weather description for a given location."""
-    location = location.strip().lower()
-    if location in {"paris", "london"}:
-        return {"temperature": "14°C", "condition": "partly cloudy"}
-    return {"temperature": "unknown", "condition": "unknown"}
-
-
-@tool
-def get_git_status(args: Optional[str] = '') -> Dict[str, str]:
-    """Return the output of ``git status`` (optionally with extra args)."""
-    print(f"🤖 git status {args}", file=sys.stderr)
-    return _run("git_status", ["git", "status"], args)
-
-
-@tool
-def get_git_diff(args: Optional[str] = '') -> Dict[str, str]:
-    """Return the output of ``git diff`` (optionally with extra args)."""
-    print(f"🤖 git diff {args}", file=sys.stderr)
-    return _run("git_diff", ["git", "diff"], args)
-
-# ---------------------------------------------------------------------------
-# How to discover the tools
-# ---------------------------------------------------------------------------
-
-__all__ = [
-    "tool",
-    "get_weather",
-    "get_git_status",
-    "get_git_diff",
-]

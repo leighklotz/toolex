@@ -16,4 +16,4 @@ if [ "$*" != '' ]; then
     printf "PROMPT: %s\n" "$PROMPT" >&2    
 fi
 
-${SCRIPT_DIR}/tclient.sh "$PROMPT" | pipetest "Commit" | unfence | bash
+${SCRIPT_DIR}/toolex.sh "$PROMPT" | pipetest "Commit" | unfence | bash
