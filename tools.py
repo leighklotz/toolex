@@ -7,17 +7,17 @@ Command‑line tools for simple git interaction and other utilities.
 - ``get_git_status`` – returns the plain output of ``git status``.
 - ``get_git_diff`` – returns the plain output of ``git diff`` with optional
   arguments.
-- ``get_git_has_changes`` – detects whether there are unstaged changes.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 import subprocess
 from typing import Dict, List, Optional
 
 # ---------------------------------------------------------------------------
-# Small decorator that marks a function as a tool by setting an attribute.
+# Decorator that marks a function as a tool by setting an attribute.
 # ---------------------------------------------------------------------------
 
 def tool(func):
@@ -48,7 +48,8 @@ def _run(name: str, cmd: List[str], args: str) -> Dict[str, str]:
         Optional space-separated additional arguments to be appended to `cmd`.
     """
 
-    args = args.strip()
+    if args:
+        args = args.strip()
     if args:
         cmd = cmd + args.split(' ')
     try:
@@ -82,39 +83,15 @@ def get_weather(location: str) -> Dict[str, str]:
 @tool
 def get_git_status(args: Optional[str] = '') -> Dict[str, str]:
     """Return the output of ``git status`` (optionally with extra args)."""
+    print(f"🤖 git status {args}", file=sys.stderr)
     return _run("git_status", ["git", "status"], args)
 
 
 @tool
 def get_git_diff(args: Optional[str] = '') -> Dict[str, str]:
     """Return the output of ``git diff`` (optionally with extra args)."""
+    print(f"🤖 git diff {args}", file=sys.stderr)
     return _run("git_diff", ["git", "diff"], args)
-
-
-@tool
-def get_git_has_changes() -> Dict[str, int]:
-    """Return ``0`` if there are no unstaged changes, ``1`` otherwise.
-
-    The function runs ``git diff --quiet`` which exits with status 0 when the
-    working tree is clean and 1 when there are unstaged changes.  The
-    result is returned in a dictionary so that callers can use the key
-    ``has_changes``.
-
-    The implementation uses ``subprocess.run`` directly so that we can inspect
-    the return code without caring about any output.
-    """
-    cmd = ["git", "diff", "--quiet"]
-    # ``check=False`` lets us capture the return code
-    result = subprocess.run(
-        cmd,
-        cwd=os.getcwd(),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
-    # Return 0 for clean, 1 for changes
-    return {"has_changes": result.returncode}
-
 
 # ---------------------------------------------------------------------------
 # How to discover the tools
@@ -125,5 +102,4 @@ __all__ = [
     "get_weather",
     "get_git_status",
     "get_git_diff",
-    "get_git_has_changes",
 ]
