@@ -8,4 +8,4 @@ LLAMAFILES_SCRIPT_DIR=~/wip/llamafiles/scripts/
 source ${SCRIPT_DIR}/.venv/bin/activate
 
 
-~/wip/toolex/toolex.py "$*"
+~/wip/toolex/toolex.py "$@"

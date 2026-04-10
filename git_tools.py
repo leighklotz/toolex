@@ -3,7 +3,7 @@
 
 import sys
 from typing import Dict, List, Optional
-from tools import tool, run_tool
+from tooling import tool, run_tool
 
 # ----------------------------------------------------------------------
 # Public tools

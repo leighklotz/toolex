@@ -8,15 +8,15 @@
 ├── git_tools.py        # git‑related tools (status, diff, dummy weather)
 ├── help-commit.sh      # Bash helper that asks the LLM to generate a commit command
 ├── pipetest.sh         # Safe‑pipeline helper – prompts for Y/N before forwarding data
-├── toolex.py          # Thin client that talks to a local /v1/chat/completions endpoint
-├── toolex.sh          # Convenience shell wrapper for `toolex.py`
-├── tools.py            # Decorator & CLI helpers used by all tools
+├── toolex.py           # Thin client that talks to a local /v1/chat/completions endpoint
+├── toolex.sh           # Convenience shell wrapper for `toolex.py`
+├── tooling.py          # Decorator & CLI helpers used by all tools
 ├── weather_tools.py    # A duplicate of get_weather for demonstration
 ├── __init__.py
 └── README.md           # ← you’re here
 ```
 
-* `tools.py` – defines the `@tool` decorator and `run_tool` helper.
+* `tooling.py` – defines the `@tool` decorator and `run_tool` helper.
 * `git_tools.py` – registers a handful of **git** utilities (status, diff, weather fallback).
 * `toolex.py` – parses CLI arguments, auto‑generates *OpenAI‑style* tool schemas, sends a request to the `VIA_API_CHAT_BASE` (defaults to `http://127.0.0.1:5000/`), and orchestrates the tool calls.
 * `help-commit.sh` – shows how to build a prompt that instructs the model to inspect the repository and emit a `git commit -a` command.  It relies on `pipetest.sh` to confirm you want to run the committed command.
