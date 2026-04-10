@@ -25,6 +25,7 @@
 
 ```bash
 # 1. Install dependencies
+mkvenv
 pip install -r requirements.txt   # (requirements.py/pytest omitted for brevity)
 
 # 2. Start a local OpenAI mimic (e.g. via `fairseq-openai` or `wml.llm`)

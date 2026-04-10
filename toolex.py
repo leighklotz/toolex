@@ -177,11 +177,13 @@ def main(prompt: str):
                     {
                         "role": "tool",
                         "tool_call_id": call["id"],
-                        "content": json.dumps(result),
+                        "content": json.dumps(result, default=str),
                     }
                 )
         else:
-            print(choice["message"]["content"])
+            # Extract only the message object to maintain consistent schema
+            messages.append(choice["message"])
+            print(json.dumps(messages, default=str, indent=4))
             break
 
 

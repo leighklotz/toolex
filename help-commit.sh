@@ -2,7 +2,7 @@
 
 SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE}")")"
 
-source "${SCRIPT_DIR}/pipetest.sh"
+# source "${SCRIPT_DIR}/functions.sh"
 
 
 # PROMPT='Use `git diff` and `git status` to understand the changes in the current repo. Write a `git commit` command describing the uncommited changes, ready to execute in a bash fence.'
