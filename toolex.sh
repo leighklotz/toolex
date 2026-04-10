@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE}")")"
 LLAMAFILES_SCRIPT_DIR=~/wip/llamafiles/scripts/
