@@ -4,6 +4,8 @@
 # ./toolex.py --tools git_tools 'What were recent changes?'
 # or
 # ./toolex.py --tools git_tools --tools weather_tools 'Is it too hot today to work on git?'
+# or
+# ./toolex.py --tools git_tools --tools weather_tools --pipe
 
 import logging
 import importlib
@@ -16,7 +18,7 @@ from pathlib import Path
 from typing import get_origin, get_args, Any, Union
 import argparse
 
-# Logging – a simple, module‑level logger
+# Logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -28,7 +30,6 @@ logger = logging.getLogger(__name__)
 VIA_API_CHAT_BASE = os.getenv("VIA_API_CHAT_BASE", "http://127.0.0.1:5000")
 URL = f"{VIA_API_CHAT_BASE}/v1/chat/completions"
 
-# Utilities for building OpenAI‑style tool specifications
 def _array_type_from_annotation(ann):
     """Return the inner type of List[T], Optional[List[T]], etc."""
     if get_origin(ann) is Union:
@@ -39,7 +40,6 @@ def _array_type_from_annotation(ann):
         return get_args(ann)[0]
     return None
 
-
 def build_tools_from_module(module):
     """Return a list of OpenAI‑style tool dicts from a module."""
     tools = []
@@ -49,14 +49,11 @@ def build_tools_from_module(module):
             sig = inspect.signature(obj)
             params = {}
             required = []
-
             for p in sig.parameters.values():
                 item_type = _array_type_from_annotation(p.annotation)
                 if item_type:
                     # list/tuple/set → array of simple types
-                    attr = {str: "string", int: "integer", float: "number"}.get(
-                        item_type, "string"
-                    )
+                    attr = {str: "string", int: "integer", float: "number"}.get(item_type, "string")
                     params[p.name] = {
                         "type": "array",
                         "items": {"type": attr},
@@ -64,53 +61,25 @@ def build_tools_from_module(module):
                     }
                 else:
                     # singular value
-                    attr = {str: "string", int: "integer", float: "number"}.get(
-                        p.annotation, "string"
-                    )
+                    attr = {str: "string", int: "integer", float: "number"}.get(p.annotation, "string")
                     params[p.name] = {"type": attr, "description": p.name}
 
                 if p.default is inspect._empty:
                     required.append(p.name)
 
-            tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": obj.__name__,
-                        "description": (obj.__doc__ or "").strip(),
-                        "parameters": {
-                            "type": "object",
-                            "properties": params,
-                            "required": required,
-                        },
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": obj.__name__,
+                    "description": (obj.__doc__ or "").strip(),
+                    "parameters": {
+                        "type": "object",
+                        "properties": params,
+                        "required": required,
                     },
-                }
-            )
+                },
+            })
     return tools
-
-
-# CLI arguments
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    "--tools",
-    action="append",
-    default=[],
-    help="Add a Python module that contains tool functions (can be used multiple times)",
-)
-parser.add_argument(
-    "prompt",
-    nargs=argparse.REMAINDER,
-    help="Prompt to send to the model",
-)
-
-args = parser.parse_args()
-MODULE_NAMES = args.tools or ["git_tools"]  # default if none provided
-
-# Import tool modules
-MODULES = [importlib.import_module(name) for name in MODULE_NAMES]
-
-# Build the OpenAI‑tool list that will be sent to the LLM
-TOOLS = [t for m in MODULES for t in build_tools_from_module(m)]
 
 # execute_tool – the heart of the question
 def execute_tool(tool_name: str, *args, **kwargs):
@@ -142,27 +111,66 @@ def execute_tool(tool_name: str, *args, **kwargs):
 
     return result
 
+def main(args):
+    # Determine initial messages
+    messages = []
+    default_prompt = "Answer briefly: What's the weather like in Paris?"
+    prompt_text = " ".join(args.prompt) or default_prompt
 
-# chat loop
-def main(prompt: str):
-    messages = [{"role": "user", "content": prompt}]
+    if args.pipe:
+        try:
+            input_data = sys.stdin.read().strip()
+            if input_data:
+                # Strip the magic header if it's present at the start of the string
+                magic_header = "Content-Type: application/x-llm-history+json"
+                if input_data.startswith(magic_header):
+                    input_data = input_data[len(magic_header):].strip()
+                
+                messages = json.loads(input_data)
+                logger.info(f"Loaded message history from stdin via --pipe: {messages=}")
+            else:
+                messages = [{"role": "user", "content": prompt_text}]
+        except Exception as e:
+            logger.error(f"Failed to parse JSON from stdin. Data snippet: {input_data[:50]!r}", exc_info=True)
+            messages = [{"role": "user", "content": prompt_text}]
+    else:
+        messages = [{"role": "user", "content": prompt_text}]
+
+    global MODULES, TOOLS
+    MODULES = [importlib.import_module(name) for name in args.tools or ["git_tools"]]
+    TOOLS = [t for m in MODULES for t in build_tools_from_module(m)]
+
     TOTAL_ITERATIONS = 10
-
     for i in range(TOTAL_ITERATIONS):
-        response = requests.post(URL, json={"messages": messages, "tools": TOOLS}).json()
-        if not 'choices' in response:
-            import pdb;pdb.set_trace()
+        # CHECK: If the last message is an assistant message with NO tool calls, 
+        # it means the conversation is already "finished". 
+        # We should stop and just return the history.
+        if messages and messages[-1].get("role") == "assistant" and not messages[-1].get("tool_calls"):
+            if sys.stdout.isatty() and not args.pipe:
+                print(messages[-1].get("content", ""))
+            else:
+                print(json.dumps(messages, default=str, indent=4))
+            break
+
+        try:
+            response = requests.post(URL, json={"messages": messages, "tools": TOOLS}).json()
+        except Exception as e:
+            logger.error(f"Request failed: {e}")
+            break
+
+        if 'choices' not in response:
+            logger.error(f"Unexpected response format: {response}")
+            break
+            
         choice = response["choices"][0]
 
-        if choice["finish_reason"] == "tool_calls":
+        if choice.get("finish_reason") == "tool_calls":
             assistant_msg = choice["message"]
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": assistant_msg["content"],
-                    "tool_calls": assistant_msg["tool_calls"],
-                }
-            )
+            messages.append({
+                "role": "assistant",
+                "content": assistant_msg.get("content"),
+                "tool_calls": assistant_msg["tool_calls"],
+            })
 
             for call in assistant_msg["tool_calls"]:
                 fn = call["function"]
@@ -173,19 +181,50 @@ def main(prompt: str):
                 if not isinstance(result, (dict, list, str, int, float, bool)):
                     result = {"result": str(result)}
 
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call["id"],
-                        "content": json.dumps(result, default=str),
-                    }
-                )
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call["id"],
+                    "content": json.dumps(result, default=str),
+                })
         else:
-            # Extract only the message object to maintain consistent schema
             messages.append(choice["message"])
-            print(json.dumps(messages, default=str, indent=4))
+            # If we are in a terminal, print the content only. 
+            # If we are in a pipe (args.pipe is True), print the full JSON history.
+            if sys.stdout.isatty() and not args.pipe:
+                content = choice["message"].get("content", "")
+                print(content)
+            else:
+                # This ensures that when piped, the full resolved conversation is passed on
+                print(json.dumps(messages, default=str, indent=4))
             break
 
+# CLI arguments
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--pipe", 
+    action="store_true", 
+    help="Enable pipe mode (read JSON from stdin)"
+)
+parser.add_argument(
+    "--tools",
+    action="append",
+    default=[],
+    help="Add a Python module that contains tool functions (can be used multiple times)",
+)
+parser.add_argument(
+    "prompt",
+    nargs=argparse.REMAINDER,
+    help="Prompt to send to the model",
+)
+
+args = parser.parse_args()
+MODULE_NAMES = args.tools or ["git_tools"]  # default if none provided
+
+# Import tool modules
+MODULES = [importlib.import_module(name) for name in MODULE_NAMES]
+
+# Build the OpenAI‑tool list that will be sent to the LLM
+TOOLS = [t for m in MODULES for t in build_tools_from_module(m)]
 
 __all__ = [
     "execute_tool",
@@ -193,5 +232,11 @@ __all__ = [
 ]
 
 if __name__ == "__main__":
-    # The prompt is everything after the last option
-    main(" ".join(args.prompt) or "Answer briefly: What's the weather like in Paris?")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--pipe", action="store_true", help="Enable pipe mode (read JSON from stdin)")
+    parser.add_argument("--tools", action="append", default=[], help="Add Python modules")
+    parser.add_argument("prompt", nargs=argparse.REMAINDER, help="Prompt")
+    args = parser.parse_args()
+    main(args)
+
+
