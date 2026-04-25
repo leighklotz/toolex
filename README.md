@@ -1,11 +1,12 @@
 # toolex – Git Tool Demo
 
-`toolex` is a lightweight framework that turns ordinary Python functions into LLM‑ready tools that can be called from an OpenAI‑compatible API.  The framework is intentionally small, making it easy to add new tools and keep your codebase self‑contained.
+`toolex` is a lightweight framework that turns ordinary Python functions into LLM‑ready tools that can be called from an OpenAI‑compatible API. The framework is intentionally small, making it easy to add new tools and keep your codebase self‑contained.
 
 ## Project layout
 
 ```text
-├── git_tools.py        # git‑related tools (status, diff, dummy weather)
+├── bash_tools.py       # shell-related tools (ls, pwd, cat, find, etc.)
+├── git_tools.py        # git-related tools (status, diff, etc.)
 ├── help-commit.sh      # Bash helper that asks the LLM to generate a commit command
 ├── pipetest.sh         # Safe‑pipeline helper – prompts for Y/N before forwarding data
 ├── toolex.py           # Thin client that talks to a local /v1/chat/completions endpoint
@@ -17,9 +18,10 @@
 ```
 
 * `tooling.py` – defines the `@tool` decorator and `run_tool` helper.
-* `git_tools.py` – registers a handful of **git** utilities (status, diff, weather fallback).
+* `bash_tools.py` – registers a handful of **shell** utilities (ls, pwd, cat, find, df, etc.).
+* `git_tools.py` – registers a handful of **git** utilities (status, diff, merge, etc.).
 * `toolex.py` – parses CLI arguments, auto‑generates *OpenAI‑style* tool schemas, sends a request to the `VIA_API_CHAT_BASE` (defaults to `http://127.0.0.1:5000/`), and orchestrates the tool calls.
-* `help-commit.sh` – shows how to build a prompt that instructs the model to inspect the repository and emit a `git commit -a` command.  It relies on `pipetest.sh` to confirm you want to run the committed command.
+* `help-commit.sh` – shows how to build a prompt that instructs the model to inspect the repository and emit a `git commit -a` command. It relies on `pipetest.sh` to confirm you want to run the committed command.
 
 ## Getting started
 
@@ -84,19 +86,23 @@ echo no changes
 * **Tell the client** – pass the module name with `--tools`, e.g.:
 
   ```bash
-  ./toolex.py --tools weather_tools "What's the weather in London?"
+  # Using bash tools
+  ./toolex.py --tools bash_tools "List all files in the current directory"
+
+  # Using multiple tool modules
+  ./toolex.py --tools git_tools --tools weather_tools "What's the weather in London and what is my git status?"
   ```
 
 * The client will automatically pick up the new tool, generate the correct schema, and use it when the model asks for it.
 
 ## `toolex.sh`
 
-Convenience wrapper for systems where the binary is installed in `~/wip/toolex`.  All flags are forwarded to `toolex.py`.
+Convenience wrapper for systems where the binary is installed in `~/wip/toolex`. All flags are forwarded to `toolex.py`.
 
 ```bash
 ./toolex.sh --tools git_tools "What's up?"
 ```
 
----
 
-Happy hacking!
+
+
