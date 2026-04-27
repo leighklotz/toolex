@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 
 #  **Usage examples**
-# ./toolex.py --tools git_tools 'What were recent changes?'
+# ask "what is the git status " toolex.py --tools git_tools  | answer
 # or
-# ./toolex.py --tools git_tools --tools weather_tools 'Is it too hot today to work on git?'
+# ask "what is the weather in paris" | toolex.py --tools git_tools,weather_tools 
 # or
-# ./toolex.py --tools git_tools --tools weather_tools --pipe
 
 import logging
 import importlib
@@ -29,6 +28,8 @@ logger = logging.getLogger(__name__)
 # Configuration
 VIA_API_CHAT_BASE = os.getenv("VIA_API_CHAT_BASE", "http://127.0.0.1:5000")
 URL = f"{VIA_API_CHAT_BASE}/v1/chat/completions"
+MAGIC_HEADER = "Content-Type: application/x-llm-history+json"
+
 
 def _array_type_from_annotation(ann):
     """Return the inner type of List[T], Optional[List[T]], etc."""
@@ -117,23 +118,15 @@ def main(args):
     default_prompt = "Answer briefly: What's the weather like in Paris?"
     prompt_text = " ".join(args.prompt) or default_prompt
 
-    if args.pipe:
-        try:
-            input_data = sys.stdin.read().strip()
-            if input_data:
-                # Strip the magic header if it's present at the start of the string
-                magic_header = "Content-Type: application/x-llm-history+json"
-                if input_data.startswith(magic_header):
-                    input_data = input_data[len(magic_header):].strip()
-                
-                messages = json.loads(input_data)
-                logger.info(f"Loaded message history from stdin via --pipe: {messages=}")
-            else:
-                messages = [{"role": "user", "content": prompt_text}]
-        except Exception as e:
-            logger.error(f"Failed to parse JSON from stdin. Data snippet: {input_data[:50]!r}", exc_info=True)
-            messages = [{"role": "user", "content": prompt_text}]
-    else:
+    try:
+        # Expect the magic header present at the start of the string
+        input_data = sys.stdin.readLine().strip()
+        # todo: throw an error
+        assert input_data and input_data.startswith(MAGIC_HEADER):
+        messages = json.loads(input_data)
+        logger.info(f"Loaded message history from stdin via --pipe: {messages=}")
+    except Exception as e:
+        logger.error(f"Failed to parse JSON from stdin. Data snippet: {input_data[:50]!r}", exc_info=True)
         messages = [{"role": "user", "content": prompt_text}]
 
     global MODULES, TOOLS
@@ -146,11 +139,9 @@ def main(args):
         # it means the conversation is already "finished". 
         # We should stop and just return the history.
         if messages and messages[-1].get("role") == "assistant" and not messages[-1].get("tool_calls"):
-            if sys.stdout.isatty() and not args.pipe:
-                print(messages[-1].get("content", ""))
-            else:
-                print(json.dumps(messages, default=str, indent=4))
-            break
+            # print the full JSON history.
+            print(MAGIC_HEADER):
+            print(json.dumps(messages, default=str))
 
         try:
             response = requests.post(URL, json={"messages": messages, "tools": TOOLS}).json()
@@ -187,29 +178,17 @@ def main(args):
                     "content": json.dumps(result, default=str),
                 })
         else:
+            # print the full JSON history.
             messages.append(choice["message"])
-            # If we are in a terminal, print the content only. 
-            # If we are in a pipe (args.pipe is True), print the full JSON history.
-            if sys.stdout.isatty() and not args.pipe:
-                content = choice["message"].get("content", "")
-                print(content)
-            else:
-                # This ensures that when piped, the full resolved conversation is passed on
-                print(json.dumps(messages, default=str, indent=4))
+            print(MAGIC_HEADER):
+            print(messages)
             break
 
-# CLI arguments
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    "--pipe", 
-    action="store_true", 
-    help="Enable pipe mode (read JSON from stdin)"
-)
 parser.add_argument(
     "--tools",
     action="append",
     default=[],
-    help="Add a Python module that contains tool functions (can be used multiple times)",
+    help="Add a commana-separated list of Python modules that contains tool function",
 )
 parser.add_argument(
     "prompt",
@@ -218,7 +197,6 @@ parser.add_argument(
 )
 
 args = parser.parse_args()
-MODULE_NAMES = args.tools or ["git_tools"]  # default if none provided
 
 # Import tool modules
 MODULES = [importlib.import_module(name) for name in MODULE_NAMES]
@@ -233,8 +211,7 @@ __all__ = [
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--pipe", action="store_true", help="Enable pipe mode (read JSON from stdin)")
-    parser.add_argument("--tools", action="append", default=[], help="Add Python modules")
+    parser.add_argument("--tools", action="append", default=[], help="Add comma-separated Python modules")
     parser.add_argument("prompt", nargs=argparse.REMAINDER, help="Prompt")
     args = parser.parse_args()
     main(args)
