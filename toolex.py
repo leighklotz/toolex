@@ -188,7 +188,7 @@ parser.add_argument(
     "--tools",
     action="append",
     default=[],
-    help="Add a commana-separated list of Python modules that contains tool function",
+    help="Add a Python module that contains tools functions",
 )
 parser.add_argument(
     "prompt",
@@ -211,7 +211,7 @@ __all__ = [
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tools", action="append", default=[], help="Add comma-separated Python modules")
+    parser.add_argument("--tools", action="append", default=[], help="Add tools modules; call multiple times")
     parser.add_argument("prompt", nargs=argparse.REMAINDER, help="Prompt")
     args = parser.parse_args()
     main(args)

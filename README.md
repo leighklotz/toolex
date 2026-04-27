@@ -33,8 +33,11 @@ pip install -r requirements.txt   # (requirements.py/pytest omitted for brevity)
 # 2. Start a local OpenAI mimic (e.g. via `fairseq-openai` or `wml.llm`)
 export VIA_API_CHAT_BASE="http://127.0.0.1:5000"
 
-# 3. Run the client
+# 3. Run the client with a tool
 ./toolex.py --tools git_tools "What is the current status of the repository?"
+
+# 4. Run the client with multip;le tools
+./toolex.py --tools git_tools --tools weather_tools "What is the ratio of git commits to current temperature in Paris?"
 ```
 
 The client will:
