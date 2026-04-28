@@ -15,4 +15,4 @@ if [ "$*" != '' ]; then
     printf "PROMPT: %s\n" "$PROMPT" >&2    
 fi
 
-${SCRIPT_DIR}/toolex.sh "$PROMPT" | answer | pipetest "Commit" | unfence | bash
+ask "$PROMPT" | tools --tools git_tools | answer | pipetest "Commit" | unfence | bash

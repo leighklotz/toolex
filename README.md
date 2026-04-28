@@ -10,7 +10,7 @@
 ├── help-commit.sh      # Bash helper that asks the LLM to generate a commit command
 ├── pipetest.sh         # Safe‑pipeline helper – prompts for Y/N before forwarding data
 ├── toolex.py           # Thin client that talks to a local /v1/chat/completions endpoint
-├── toolex.sh           # Convenience shell wrapper for `toolex.py`
+├── tools.sh            # Convenience shell wrapper for `toolex.py`
 ├── tooling.py          # Decorator & CLI helpers used by all tools
 ├── weather_tools.py    # A duplicate of get_weather for demonstration
 ├── __init__.py

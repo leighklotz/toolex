@@ -3,7 +3,7 @@
 #  **Usage examples**
 # ask "what is the git status " toolex.py --tools git_tools  | answer
 # or
-# ask "what is the weather in paris" | toolex.py --tools git_tools,weather_tools 
+# ask "what is the weather in paris" | toolex.py --tools git_tools,weather_tools
 # or
 
 import logging
@@ -13,8 +13,7 @@ import json
 import os
 import requests
 import sys
-from pathlib import Path
-from typing import get_origin, get_args, Any, Union
+from typing import get_origin, get_args, Union
 import argparse
 
 # Logging
@@ -24,6 +23,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 # Configuration
 VIA_API_CHAT_BASE = os.getenv("VIA_API_CHAT_BASE", "http://127.0.0.1:5000")
@@ -41,6 +41,7 @@ def _array_type_from_annotation(ann):
         return get_args(ann)[0]
     return None
 
+
 def build_tools_from_module(module):
     """Return a list of OpenAI‑style tool dicts from a module."""
     tools = []
@@ -54,7 +55,9 @@ def build_tools_from_module(module):
                 item_type = _array_type_from_annotation(p.annotation)
                 if item_type:
                     # list/tuple/set → array of simple types
-                    attr = {str: "string", int: "integer", float: "number"}.get(item_type, "string")
+                    attr = {str: "string", int: "integer", float: "number"}.get(
+                        item_type, "string"
+                    )
                     params[p.name] = {
                         "type": "array",
                         "items": {"type": attr},
@@ -62,25 +65,30 @@ def build_tools_from_module(module):
                     }
                 else:
                     # singular value
-                    attr = {str: "string", int: "integer", float: "number"}.get(p.annotation, "string")
+                    attr = {str: "string", int: "integer", float: "number"}.get(
+                        p.annotation, "string"
+                    )
                     params[p.name] = {"type": attr, "description": p.name}
 
                 if p.default is inspect._empty:
                     required.append(p.name)
 
-            tools.append({
-                "type": "function",
-                "function": {
-                    "name": obj.__name__,
-                    "description": (obj.__doc__ or "").strip(),
-                    "parameters": {
-                        "type": "object",
-                        "properties": params,
-                        "required": required,
+            tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": obj.__name__,
+                        "description": (obj.__doc__ or "").strip(),
+                        "parameters": {
+                            "type": "object",
+                            "properties": params,
+                            "required": required,
+                        },
                     },
-                },
-            })
+                }
+            )
     return tools
+
 
 # execute_tool – the heart of the question
 def execute_tool(tool_name: str, *args, **kwargs):
@@ -112,22 +120,22 @@ def execute_tool(tool_name: str, *args, **kwargs):
 
     return result
 
+
 def main(args):
     # Determine initial messages
     messages = []
-    default_prompt = "Answer briefly: What's the weather like in Paris?"
-    prompt_text = " ".join(args.prompt) or default_prompt
 
+    # Expect the magic header present at the start of the string
+    line = sys.stdin.readline().strip()
     try:
-        # Expect the magic header present at the start of the string
-        input_data = sys.stdin.readLine().strip()
-        # todo: throw an error
-        assert input_data and input_data.startswith(MAGIC_HEADER):
-        messages = json.loads(input_data)
+        logger.info(f"header line is {line=}\n")
+        messages = json.load(sys.stdin)
         logger.info(f"Loaded message history from stdin via --pipe: {messages=}")
-    except Exception as e:
-        logger.error(f"Failed to parse JSON from stdin. Data snippet: {input_data[:50]!r}", exc_info=True)
-        messages = [{"role": "user", "content": prompt_text}]
+    except Exception:
+        logger.error(
+            f"Failed to parse JSON from stdin. Data snippet: {input_data[:50]!r}",
+            exc_info=True,
+        )
 
     global MODULES, TOOLS
     MODULES = [importlib.import_module(name) for name in args.tools or ["git_tools"]]
@@ -135,33 +143,41 @@ def main(args):
 
     TOTAL_ITERATIONS = 10
     for i in range(TOTAL_ITERATIONS):
-        # CHECK: If the last message is an assistant message with NO tool calls, 
-        # it means the conversation is already "finished". 
+        # CHECK: If the last message is an assistant message with NO tool calls,
+        # it means the conversation is already "finished".
         # We should stop and just return the history.
-        if messages and messages[-1].get("role") == "assistant" and not messages[-1].get("tool_calls"):
+        if (
+            messages
+            and messages[-1].get("role") == "assistant"
+            and not messages[-1].get("tool_calls")
+        ):
             # print the full JSON history.
-            print(MAGIC_HEADER):
+            print(MAGIC_HEADER)
             print(json.dumps(messages, default=str))
 
         try:
-            response = requests.post(URL, json={"messages": messages, "tools": TOOLS}).json()
+            response = requests.post(
+                URL, json={"messages": messages, "tools": TOOLS}
+            ).json()
         except Exception as e:
             logger.error(f"Request failed: {e}")
             break
 
-        if 'choices' not in response:
+        if "choices" not in response:
             logger.error(f"Unexpected response format: {response}")
             break
-            
+
         choice = response["choices"][0]
 
         if choice.get("finish_reason") == "tool_calls":
             assistant_msg = choice["message"]
-            messages.append({
-                "role": "assistant",
-                "content": assistant_msg.get("content"),
-                "tool_calls": assistant_msg["tool_calls"],
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": assistant_msg.get("content"),
+                    "tool_calls": assistant_msg["tool_calls"],
+                }
+            )
 
             for call in assistant_msg["tool_calls"]:
                 fn = call["function"]
@@ -172,38 +188,22 @@ def main(args):
                 if not isinstance(result, (dict, list, str, int, float, bool)):
                     result = {"result": str(result)}
 
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": call["id"],
-                    "content": json.dumps(result, default=str),
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call["id"],
+                        "content": json.dumps(result, default=str),
+                    }
+                )
         else:
             # print the full JSON history.
             messages.append(choice["message"])
-            print(MAGIC_HEADER):
+            print(MAGIC_HEADER)
             print(messages)
             break
 
-parser.add_argument(
-    "--tools",
-    action="append",
-    default=[],
-    help="Add a Python module that contains tools functions",
-)
-parser.add_argument(
-    "prompt",
-    nargs=argparse.REMAINDER,
-    help="Prompt to send to the model",
-)
-
-args = parser.parse_args()
-
-# Import tool modules
-MODULES = [importlib.import_module(name) for name in MODULE_NAMES]
 
 # Build the OpenAI‑tool list that will be sent to the LLM
-TOOLS = [t for m in MODULES for t in build_tools_from_module(m)]
-
 __all__ = [
     "execute_tool",
     "main",
@@ -211,9 +211,11 @@ __all__ = [
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tools", action="append", default=[], help="Add tools modules; call multiple times")
-    parser.add_argument("prompt", nargs=argparse.REMAINDER, help="Prompt")
+    parser.add_argument(
+        "--tools",
+        action="append",
+        default=[],
+        help="Add a Python module that contains tools functions",
+    )
     args = parser.parse_args()
     main(args)
-
-
