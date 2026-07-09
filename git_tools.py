@@ -42,12 +42,7 @@ def do_git_rebase(args: Optional[str] = "") -> Dict[str, str]: pass
 # Tool discovery
 # ----------------------------------------------------------------------
 __all__ = [
-    "get_git_status",
-    "get_git_diff",
-    "get_git_branch",
-    "do_git_merge",
-    "do_git_rebase",
-    "do_git_checkout",
-    "do_git_pull"
+    name for name, obj in globals().items() 
+    if getattr(obj, "_is_toolex_tool", False) and obj.__module__ == __name__
 ]
 
