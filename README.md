@@ -8,9 +8,8 @@
 ├── bash_tools.py       # shell-related utilities (ls, pwd, command execution, etc.)
 ├── git_tools.py        # git-related tools (status, diff, etc.)
 ├── help-commit.sh      # Bash helper that asks the LLM to generate a commit command
-├── pipetest.sh         # Safe‑pipeline helper – prompts for Y/N before forwarding data
 ├── toolex.py           # Thin client that talks to a local /v1/chat/completions endpoint
-├── tools.sh            # Convenience shell wrapper for `toolex.py`
+├── toolex.sh           # Convenience shell wrapper for `toolex.py`
 ├── tooling.py          # Decorator & CLI helpers used by all tools
 ├── weather_tools.py    # A duplicate of get_weather for demonstration
 ├── __init__.py
@@ -21,7 +20,7 @@
 * `bash_tools.py` – registers a handful of **shell** utilities (ls, pwd, cat, find, command execution, etc.).
 * `git_tools.py` – registers a handful of **git** utilities (status, diff, merge, etc.).
 * `toolex.py` – parses CLI arguments, auto‑generates *OpenAI-style* tool schemas, sends a request to the `VIA_API_CHAT_BASE` (defaults to `http://127.0.0.1:5000/`), and orchestrates the tool calls.
-* `help-commit.sh` – shows how to build a prompt that instructs the model to inspect the repository and emit a `git commit -a` command. It relies on `pipetest.sh` to confirm you want to run the committed command.
+* `help-commit.sh` – shows how to build a prompt that instructs the model to inspect the repository and emit a `git commit -a` command. It relies on `unfence` to confirm you want to run the committed command.
 
 ## Getting started
 
@@ -57,7 +56,7 @@ The client will:
 * `help-commit.sh` creates a prompt that asks the model to:
   * Run `git status` and `git diff`.
   * Print a commit command in a fenced bash block **or** say nothing if there are no changes.
-* `pipetest.sh` prompts you “Y or N?” before piping the command to `bash`.
+* `unfence` prompts you “Y or N?” before piping the command to `bash`.
 * The result is a one‑liner `git commit -a -m "…"` with proper quoting.
 
 Example output (when changes exist):
