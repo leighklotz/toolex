@@ -4,9 +4,9 @@ SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE}")")"
 ANSWER_DIR="$(dirname "$(realpath "${BASH_SOURCE}")")/../answer"
 source "${ANSWER_DIR}/functions.sh"
 
+# PROMPT='Use `git status` and `git diff` and analyze the results to output a bash fence containing a git commit command to commit the staged and unstaged changes. Summarize the impact/import of the changes in the first message line. Write a detailed, imperative message with multiple vertically aligned `-m` flags summarizing specific changes. Properly quote the bash strings. Ignore untracked files. If there are no changes to commit, output `echo no changes` instead of a `git commit` command.'
 
-PROMPT='Use `git status` and `git diff` and analyze the results to output a bash fence containing a `git commit -a` command to commit the staged and unstaged changes. Summarize the impact/import of the changes in the first message line. Write a detailed, imperative message with multiple vertically aligned `-m` flags summarizing specific changes. Properly quote the bash strings. Ignore untracked files. Omit commentary after the command. If there are no changes to commit, output `echo no changes` instead of a `git commit -a` command.
-'
+PROMPT='Explore the changes in the current repo and prepare one or more git commits with conventional-commit messages. Output a bash code fence to commit all staged and unstaged changes, ignoring untracked files. Output only an appropriate `echo` if there is nothing to commit.'
 
 if [ "$*" != '' ]; then
     PROMPT_ADD="Append '$*' flags to all \`git diff\` commands."
@@ -15,4 +15,4 @@ if [ "$*" != '' ]; then
     printf "PROMPT: %s\n" "$PROMPT" >&2    
 fi
 
-ask "$PROMPT" | tools --tools git_tools | answer | pipetest "Commit" | unfence | bash
+ask "$PROMPT" | tools git | unfence | bash
