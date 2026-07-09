@@ -20,6 +20,12 @@ def get_git_diff(args: Optional[str] = "") -> Dict[str, str]:
     print(f"🤖 git diff {args}", file=sys.stderr)
     return run_tool("git_diff", ["git", "diff"], args)
 
+@tool("read")
+def get_git_branches(args: Optional[str] = "") -> Dict[str, str]:
+    """Return the output of ``git branch`` (optionally with specified args)."""
+    print(f"🤖 git branch {args}", file=sys.stderr)
+    return run_tool("git_branch", ["git", "branch"], args)
+
 @tool("write")
 def do_git_merge(args: Optional[str] = "") -> Dict[str, str]:
     """Do `git merge` (optionally with specified args)."""
@@ -51,8 +57,9 @@ def do_git_rebase(args: Optional[str] = "") -> Dict[str, str]:
 __all__ = [
     "get_git_status",
     "get_git_diff",
-     "do_git_merge",
-     "do_git_rebase",
-     "do_git_checkout",
-     "do_git_pull"
+    "get_git_branches",
+    "do_git_merge",
+    "do_git_rebase",
+    "do_git_checkout",
+    "do_git_pull"
 ]
