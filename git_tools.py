@@ -27,12 +27,6 @@ def do_git_merge(args: Optional[str] = "") -> Dict[str, str]:
     return run_tool("git_merge", ["git", "merge"], args)
 
 @tool("write")
-def do_git_rebase(args: Optional[str] = "") -> Dict[str, str]:
-    """Do `git rebase` (optionally with specified args)."""
-    print(f"🤖 git rebase {args}", file=sys.stderr)
-    return run_tool("git_rebase", ["git", "rebase"], args)
-
-@tool("write")
 def do_git_checkout(args: Optional[str] = "") -> Dict[str, str]:
     """Do `git checkout` (optionally with specified args)."""
     print(f"🤖 git checkout {args}", file=sys.stderr)
@@ -43,6 +37,13 @@ def do_git_pull(args: Optional[str] = "") -> Dict[str, str]:
     """Do `git pull` (optionally with specified args)."""
     print(f"🤖 git pull {args}", file=sys.stderr)
     return run_tool("git_pull", ["git", "pull"], args)
+
+@tool("write")
+def do_git_rebase(args: Optional[str] = "") -> Dict[str, str]:
+    """Do `git rebase` (optionally with specified args)."""
+    print(f"🤖 git rebase {args}", file=sys.stderr)
+    return run_tool("git_rebase", ["git", "rebase"], args)
+
 
 # ----------------------------------------------------------------------
 # Tool discovery

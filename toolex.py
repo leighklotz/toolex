@@ -97,15 +97,15 @@ def build_tools_from_module(module):
 
 def tool_to_module_name(user_tool_id: str) -> tuple[str, str]:
     """
-    Converts 'foo' or 'foo:read' into ('foo_tool', permission).
-    Returns (actual_module_import_path, required_permission).
+    Converts 'foo' or 'foo:read' into ('foo_tools', permission).
+    If no permission is present, default to ":read".
+    User must include ":all" or ":write" or ":exec" etc over override readonly.
     """
     if ":" in user_tool_id:
         base_name, perm = user_tool_id.split(":", 1)
     else:
-        base_name, perm = user_tool_id, "all"
+        base_name, perm = user_tool_id, "read"
     return f"{base_name}_tools", perm
-
 
 # execute_tool – the heart of the question
 def execute_tool(tool_module_obj, tool_func_name: str, *args, **kwargs):
@@ -192,8 +192,9 @@ def main(args):
             print(json.dumps(messages, default=str))
 
         try:
-            response = requests.post(
-                URL, json={"messages": messages, "tools": TOOLS}, timeout=30).json()
+            j = {"messages": messages, "tools": TOOLS}
+            response = requests.post(URL, json=j).json()
+            logger.debug(f"inference: {j}")
         except Exception as e:
             logger.error(f"Request failed: {e}")
             break
