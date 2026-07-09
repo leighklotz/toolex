@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
-# git_tools.py
 
 import sys
 from typing import Dict, List, Optional
 from tooling import tool, run_tool, discover_tools
 
-# ----------------------------------------------------------------------
-# Public tools
-# ----------------------------------------------------------------------
 @tool("read")
 def get_weather(location: str) -> Dict[str, str]:
     """Return weather for a given location."""
