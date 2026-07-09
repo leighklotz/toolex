@@ -20,7 +20,7 @@ def get_weather(location: str) -> Dict[str, str]:
 @tool("read")
 def get_location() -> Dict[str, str]:
     """Return the location."""
-    print(f"🤖 get_location", file=sys.stderr)
+    print(f"🤖 get_location", file=sys.stderr, end='')
     return { "location": "paris" }
 
 
