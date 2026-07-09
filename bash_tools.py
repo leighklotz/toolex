@@ -2,59 +2,44 @@
 
 import sys
 from typing import Dict, List, Optional
-from tooling import tool, run_tool
+from tooling import tool, run_tool, bash_wrap
 
 # ----------------------------------------------------------------------
 # Public tools
 # ----------------------------------------------------------------------
 @tool("read")
-def get_ls(args: Optional[str] = "") -> Dict[str, str]:
-    """Return the output of ``ls`` (optionally with specified args)."""
-    print(f"🤖 ls {args}", file=sys.stderr, end='')
-    return run_tool("ls", ["ls"], args)
+@bash_wrap("ls", ["ls"])
+def get_ls(args: Optional[str] = "") -> Dict[str, str]: pass
 
 @tool("read")
-def get_pwd(args: Optional[str] = "") -> Dict[str, str]:
-    """Return the current working directory."""
-    print(f"🤖 pwd {args}", file=sys.stderr, end='')
-    return run_tool("pwd", ["pwd"], args)
+@bash_wrap("pwd", ["pwd"])
+def get_pwd(args: Optional[str] = "") -> Dict[str, str]: pass
 
 @tool("read")
-def get_cat(args: Optional[str] = "") -> Dict[str, str]:
-    """Return the content of a file using ``cat``."""
-    print(f"🤖 cat {args}", file=sys.stderr, end='')
-    return run_tool("cat", ["cat"], args)
+@bash_wrap("cat", ["cat"])
+def get_cat(args: Optional[str] = "") -> Dict[str, str]: pass
 
 @tool("read")
-def get_whoami(args: Optional[str] = "") -> Dict[str, str]:
-    """Return the current user."""
-    print(f"🤖 whoami {args}", file=sys.stderr, end='')
-    return run_tool("whoami", ["whoami"], args)
+@bash_wrap("whoami", ["whoami"])
+def get_whoami(args: Optional[str] = "") -> Dict[str, str]: pass
 
 @tool("read")
-def get_date(args: Optional[str] = "") -> Dict[str, str]:
-    """Return the current system date and time."""
-    print(f"🤖 date {args}", file=sys.stderr, end='')
-    return run_tool("date", ["date"], args)
+@bash_wrap("date", ["date"])
+def get_date(args: Optional[str] = "") -> Dict[str, str]: pass
 
 @tool("read")
-def get_find(args: Optional[str] = "") -> Dict[str, str]:
-    """Search for files using the ``find`` command."""
-    print(f"🤖 find {args}", file=sys.stderr, end='')
-    return run_tool("find", ["find"], args)
+@bash_wrap("find", ["find"])
+def get_find(args: Optional[str] = "") -> Dict[str, str]: pass
 
 @tool("read")
-def get_df(args: Optional[str] = "") -> Dict[str, str]:
-    """Return disk space usage using ``df``."""
-    print(f"🤖 df {args}", file=sys.stderr, end='')
-    return run_tool("df", ["df"], args)
+@bash_wrap("df", ["df"])
+def get_df(args: Optional[str] = "") -> Dict[str, str]: pass
 
 @tool("write")
-def do_rm(args: Optional[str] = "") -> Dict[str, str]:
+@bash_wrap("rm", ["rm"])
+def do_rm(args: Optional[str] = "") -> Dict[str, str]: 
     """Delete file"""
     raise Exception("rm is not implemented")
-    print(f"🤖 rm {args}", file=sys.stderr, end='')
-    return run_tool("rm", ["rm"], args)
 
 @tool("write exec")
 def run_command(command: str) -> str:
@@ -72,14 +57,6 @@ def run_command(command: str) -> str:
 # Tool discovery
 # ----------------------------------------------------------------------
 __all__ = [
-    "get_ls",
-    "get_pwd",
-    "get_cat",
-    "get_whoami",
-    "get_date",
-    "get_find",
-    "get_df",
-    "do_rm",
-    "run_command"
+    name for name, obj in globals().items() 
+    if getattr(obj, "_is_toolex_tool", False) and obj.__module__ == __name__
 ]
-
