@@ -183,6 +183,7 @@ def main(args):
 
         try:
             j = {"messages": messages, "tools": TOOLS}
+            # print(f"{j=}", file=sys.stderr)
             _ui_status("✨")
             response = requests.post(URL, json=j).json()
         except Exception as e:

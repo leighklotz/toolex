@@ -7,6 +7,7 @@ import os
 import sys
 import subprocess
 from typing import Dict, List, Optional
+from functools import wraps  # Added to preserve function metadata
 
 # ----------------------------------------------------------------------
 # Decorator that marks a function as a tool
@@ -43,6 +44,28 @@ def tool(capabilities=None):
         return decorator
 
 # ----------------------------------------------------------------------
+# Implement bash_wrap to reduce boilerplate for shell commands
+# ----------------------------------------------------------------------
+def bash_wrap(name: str, cmd: List[str]):
+    """
+    Decorator that wraps a function into a standard command-execution pattern.
+    It replaces the function's body with logic that prints the command and calls run_tool.
+
+    Args:
+        name: The key used in the returned dictionary.
+        cmd: The list of base command arguments (e.g., ["git", "status"]).
+    """
+    def decorator(f):
+        @wraps(f)
+        def wrapper(args: Optional[str] = "") -> Dict[str, str]:
+            # Format the command string for logging/printing as seen in get_git_status
+            cmd_label = " ".join(cmd)
+            print(f"🤖 {cmd_label} {args}", file=sys.stderr)
+            return run_tool(name, cmd, args)
+        return wrapper
+    return decorator
+
+# ----------------------------------------------------------------------
 # Helper to run a command and return its output (or a short error string)
 # ----------------------------------------------------------------------
 def run_tool(name: str, cmd: List[str], args: str) -> Dict[str, str]:
@@ -71,7 +94,6 @@ def run_tool(name: str, cmd: List[str], args: str) -> Dict[str, str]:
         )
         return {name: output.strip()}
     except subprocess.CalledProcessError as exc:
-        # Return a friendly error message instead of the raw exception
         return {name: f"Error: {exc}"}
     except Exception as exc:  # pragma: no cover
         return {name: f"Unknown error: {exc}"}
