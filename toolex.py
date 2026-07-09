@@ -3,7 +3,7 @@
 #  **Usage examples**
 # ask "what is the git status " toolex.py --tools git | answer
 # or
-# ask "what is the weather in paris" | toolex.py --tools git,weather | answer
+# ask "what is the weather in paris" | toolex.py --tools git --tools weather | answer
 # or (for specific permissions)
 # ask "read file" | toolex.py --tools git:read
 
