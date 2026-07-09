@@ -56,6 +56,18 @@ def do_rm(args: Optional[str] = "") -> Dict[str, str]:
     print(f"🤖 rm {args}", file=sys.stderr)
     return run_tool("rm", ["rm"], args)
 
+@tool("write exec")
+def run_command(command: str) -> str:
+    """Executes a shell command and returns stdout and stderr."""
+    print(f"🤖 running command: {command}", file=sys.stderr)
+    import subprocess
+    try:
+        result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
+        return result.stdout + "\n" + result.stderr
+    except subprocess.CalledProcessError as e:
+        return f"Error running command: {e.stderr}\n{e.stdout}"
+
+
 # ----------------------------------------------------------------------
 # Tool discovery
 # ----------------------------------------------------------------------
@@ -67,6 +79,7 @@ __all__ = [
     "get_date",
     "get_find",
     "get_df",
-    "do_rm"
+    "do_rm",
+    "run_command"
 ]
 
