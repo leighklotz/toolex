@@ -5,7 +5,7 @@
 ## Project layout
 
 ```text
-├── bash_tools.py       # shell-related tools (ls, pwd, cat, find, etc.)
+├── bash_tools.py       # shell-related utilities (ls, pwd, command execution, etc.)
 ├── git_tools.py        # git-related tools (status, diff, etc.)
 ├── help-commit.sh      # Bash helper that asks the LLM to generate a commit command
 ├── pipetest.sh         # Safe‑pipeline helper – prompts for Y/N before forwarding data
@@ -18,9 +18,9 @@
 ```
 
 * `tooling.py` – defines the `@tool` decorator and `run_tool` helper.
-* `bash_tools.py` – registers a handful of **shell** utilities (ls, pwd, cat, find, df, etc.).
+* `bash_tools.py` – registers a handful of **shell** utilities (ls, pwd, cat, find, command execution, etc.).
 * `git_tools.py` – registers a handful of **git** utilities (status, diff, merge, etc.).
-* `toolex.py` – parses CLI arguments, auto‑generates *OpenAI‑style* tool schemas, sends a request to the `VIA_API_CHAT_BASE` (defaults to `http://127.0.0.1:5000/`), and orchestrates the tool calls.
+* `toolex.py` – parses CLI arguments, auto‑generates *OpenAI-style* tool schemas, sends a request to the `VIA_API_CHAT_BASE` (defaults to `http://127.0.0.1:5000/`), and orchestrates the tool calls.
 * `help-commit.sh` – shows how to build a prompt that instructs the model to inspect the repository and emit a `git commit -a` command. It relies on `pipetest.sh` to confirm you want to run the committed command.
 
 ## Getting started
@@ -36,8 +36,8 @@ export VIA_API_CHAT_BASE="http://127.0.0.1:5000"
 # 3. Run the client with a tool
 ./toolex.py --tools git "What is the current status of the repository?"
 
-# 4. Run the client with multip;le tools
-./toolex.py --tools git --tools weather "What is the ratio of git commits to current temperature in Paris?"
+# 4. Run the client with multiple tools
+./toolex.py --tools git weather "What is the ratio of git commits to current temperature in Paris?"
 ```
 
 The client will:
@@ -77,7 +77,7 @@ git commit -a \
   -m "Update README"
 ```
 
-If there are no changes:
+If there are no changes to commit:
 
 ```bash
 echo no changes
@@ -100,7 +100,7 @@ echo no changes
 
   # Mixing multiple modules with different permissions
   ./toolex.py --tools bash:read --tools git:write "List files and then commit them"
-  ```
+```
 
 ## Pipeline Mode (JSON)
 
@@ -119,7 +119,4 @@ Convenience wrapper for systems where the binary is installed in `~/wip/toolex`.
 ```bash
 ./toolex.sh --tools git "What's up?"
 ```
-
-
-
 
