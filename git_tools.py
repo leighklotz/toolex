@@ -2,7 +2,7 @@
 
 import sys
 from typing import Dict, List, Optional
-from tooling import tool, run_tool, bash_wrap
+from tooling import tool, run_tool, bash_wrap, discover_tools
 
 # ----------------------------------------------------------------------
 # Public tools
@@ -38,8 +38,4 @@ def do_git_pull(args: Optional[str] = "") -> Dict[str, str]: pass
 def do_git_rebase(args: Optional[str] = "") -> Dict[str, str]: pass
 
 
-__all__ = [
-    name for name, obj in globals().items() 
-    if getattr(obj, "_is_toolex_tool", False) and obj.__module__ == __name__
-]
-
+__all__ = discover_tools(globals(), __name__)

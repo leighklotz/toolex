@@ -3,7 +3,7 @@
 
 import sys
 from typing import Dict, List, Optional
-from tooling import tool, run_tool
+from tooling import tool, run_tool, discover_tools
 
 # ----------------------------------------------------------------------
 # Public tools
@@ -24,7 +24,4 @@ def get_location() -> Dict[str, str]:
     return { "location": "paris" }
 
 
-__all__ = [
-    name for name, obj in globals().items() 
-    if getattr(obj, "_is_toolex_tool", False) and obj.__module__ == __name__
-]
+__all__ = discover_tools(globals(), __name__)

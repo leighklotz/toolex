@@ -2,7 +2,7 @@
 
 import sys
 from typing import Dict, List, Optional
-from tooling import tool, run_tool
+from tooling import tool, run_tool, discover_tools
 
 @tool("read")
 def read_file(file_path: str) -> str:
@@ -64,7 +64,4 @@ def search_files(file_pattern: str, search_string: str) -> str:
                 print(f"Error reading file {filepath}: {e}")
     return "\n".join(results)
 
-__all__ = [
-    name for name, obj in globals().items() 
-    if getattr(obj, "_is_toolex_tool", False) and obj.__module__ == __name__
-]
+__all__ = discover_tools(globals(), __name__)
