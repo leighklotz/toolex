@@ -1,6 +1,6 @@
-data/
-__pycache__/
-*~*
 #*#
+*~*
+.hallux/
 .venv/
-.hallux
+__pycache__/
+
