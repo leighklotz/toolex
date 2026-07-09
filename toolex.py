@@ -181,11 +181,9 @@ def main(args):
             print(MAGIC_HEADER)
             print(json.dumps(messages, default=str))
 
-        #_ui_status("💭")
-        _ui_status("🛠️")
-
         try:
             j = {"messages": messages, "tools": TOOLS}
+            _ui_status("✨")
             response = requests.post(URL, json=j).json()
         except Exception as e:
             logger.error(f"Request failed: {e}")
@@ -313,10 +311,7 @@ def build_tools_filtered(modules, permission_map):
 
 
 def _ui_status(icon: str):
-    """Prints a single icon to stderr, clearing the line first."""
     if sys.stderr.isatty():
-        # \r moves cursor to start; \033[K clears the current line
-        # sys.stderr.write(f"\r\033[K{icon}")
         sys.stderr.write(icon)
         sys.stderr.flush()
 
