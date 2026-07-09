@@ -8,7 +8,7 @@ from tooling import tool, run_tool
 # ----------------------------------------------------------------------
 # Public tools
 # ----------------------------------------------------------------------
-@tool
+@tool("read")
 def get_weather(location: str) -> Dict[str, str]:
     """Return weather for a given location."""
     location = location.strip().lower()
@@ -17,7 +17,7 @@ def get_weather(location: str) -> Dict[str, str]:
         return {"temperature": "14°C", "condition": "partly cloudy"}
     return {"temperature": "unknown", "condition": "unknown"}
 
-@tool
+@tool("read")
 def get_location() -> Dict[str, str]:
     """Return the location."""
     print(f"🤖 get_location", file=sys.stderr)

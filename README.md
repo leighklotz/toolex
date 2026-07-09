@@ -1,11 +1,11 @@
-# toolex – Git Tool Demo
+# toolex – LLM tooling
 
 `toolex` is a lightweight framework that turns ordinary Python functions into LLM‑ready tools that can be called from an OpenAI‑compatible API. The framework is intentionally small, making it easy to add new tools and keep your codebase self‑contained.
 
 ## Project layout
 
 ```text
-├── bash_tools.py       # shell-related tools (ls, pwd, cat, find, etc.)
+├── bash_tools.py       # shell-related utilities (ls, pwd, command execution, etc.)
 ├── git_tools.py        # git-related tools (status, diff, etc.)
 ├── help-commit.sh      # Bash helper that asks the LLM to generate a commit command
 ├── pipetest.sh         # Safe‑pipeline helper – prompts for Y/N before forwarding data
@@ -18,9 +18,9 @@
 ```
 
 * `tooling.py` – defines the `@tool` decorator and `run_tool` helper.
-* `bash_tools.py` – registers a handful of **shell** utilities (ls, pwd, cat, find, df, etc.).
+* `bash_tools.py` – registers a handful of **shell** utilities (ls, pwd, cat, find, command execution, etc.).
 * `git_tools.py` – registers a handful of **git** utilities (status, diff, merge, etc.).
-* `toolex.py` – parses CLI arguments, auto‑generates *OpenAI‑style* tool schemas, sends a request to the `VIA_API_CHAT_BASE` (defaults to `http://127.0.0.1:5000/`), and orchestrates the tool calls.
+* `toolex.py` – parses CLI arguments, auto‑generates *OpenAI-style* tool schemas, sends a request to the `VIA_API_CHAT_BASE` (defaults to `http://127.0.0.1:5000/`), and orchestrates the tool calls.
 * `help-commit.sh` – shows how to build a prompt that instructs the model to inspect the repository and emit a `git commit -a` command. It relies on `pipetest.sh` to confirm you want to run the committed command.
 
 ## Getting started
@@ -34,10 +34,10 @@ pip install -r requirements.txt   # (requirements.py/pytest omitted for brevity)
 export VIA_API_CHAT_BASE="http://127.0.0.1:5000"
 
 # 3. Run the client with a tool
-./toolex.py --tools git_tools "What is the current status of the repository?"
+./toolex.py --tools git "What is the current status of the repository?"
 
-# 4. Run the client with multip;le tools
-./toolex.py --tools git_tools --tools weather_tools "What is the ratio of git commits to current temperature in Paris?"
+# 4. Run the client with multiple tools
+./toolex.py --tools git weather "What is the ratio of git commits to current temperature in Paris?"
 ```
 
 The client will:
@@ -77,7 +77,7 @@ git commit -a \
   -m "Update README"
 ```
 
-If there are no changes:
+If there are no changes to commit:
 
 ```bash
 echo no changes
@@ -86,26 +86,37 @@ echo no changes
 ## Extending the system
 
 * **Add a new module** – put a `.py` file with one or more `@tool` functions.
-* **Tell the client** – pass the module name with `--tools`, e.g.:
+* **Tell the client** – pass the module name via `--tools`. You can restrict access using colon-separated permissions (e.g., `:read`, `:write`) or grant full access to all capabilities defined in a module by using `:all`.
 
   ```bash
-  # Using bash tools
-  ./toolex.py --tools bash_tools "List all files in the current directory"
+  # Default behavior: uses ':read' permission for git_tools
+  ./toolex.py --tools git "What is the status?"
 
-  # Using multiple tool modules
-  ./toolex.py --tools git_tools --tools weather_tools "What's the weather in London and what is my git status?"
-  ```
+  # Explicitly request read-only mode via specific capability
+  ./toolex.py --tools git:read "Show me diff"
 
-* The client will automatically pick up the new tool, generate the correct schema, and use it when the model asks for it.
+  # Grant all capabilities defined in the module (e.g., write, execute)
+  ./toolex.py --tools git:all "Commit these changes"
+
+  # Mixing multiple modules with different permissions
+  ./toolex.py --tools bash:read --tools git:write "List files and then commit them"
+```
+
+## Pipeline Mode (JSON)
+
+`toolex.py` is designed to be used within agentic pipelines via `stdin` and `stdout`. It can ingest an existing OpenAI-style message history in JSON format, resolve tool calls, and output the updated conversation array back to a pipe.
+
+* **Input:** If valid JSON representing a list of messages is provided on `stdin`, the client treats it as the starting conversation state.
+* **Output:** The script outputs a magic header (`Content-Type: application/x-llm-history+json`) followed by the updated, tool-resolved JSON history to `stdout`.
+
+This allows for complex shell orchestration like:
+`ask "my prompt" | tools git --tools bash | answer`
 
 ## `toolex.sh`
 
 Convenience wrapper for systems where the binary is installed in `~/wip/toolex`. All flags are forwarded to `toolex.py`.
 
 ```bash
-./toolex.sh --tools git_tools "What's up?"
+./toolex.sh --tools git "What's up?"
 ```
-
-
-
 

@@ -11,14 +11,36 @@ from typing import Dict, List, Optional
 # ----------------------------------------------------------------------
 # Decorator that marks a function as a tool
 # ----------------------------------------------------------------------
-def tool(func):
-    """Tag a function as a `toolex` tool.
-
-    The decorator simply sets ``_is_toolex_tool = True`` on the function
-    so that the runtime can detect it.
+def tool(capabilities=None):
     """
-    func._is_toolex_tool = True
-    return func
+    Decorator for toolex tools with permission-based filtering.
+    Usage: 
+        @tool | @tool()      -> No capabilities
+        @tool('write')       -> Single capability
+        @tool('read exec')   -> Multiple capabilities
+    """
+    if callable(capabilities):
+        func = capabilities
+        caps_str = ""
+    else:
+        func = None
+        caps_str = capabilities or ""
+
+    def wrap_decorator(f):
+        f._is_toolex_tool = True
+        f._required_caps = set(caps_str.split()) if isinstance(caps_str, str) else set()
+        return f
+
+    if callable(capabilities):
+        # @tool
+        return wrap_decorator(func)
+    else:
+        # @tool('read') or @tool() 
+        def decorator(f):
+            f._is_toolex_tool = True
+            f._required_caps = set(caps_str.split()) if isinstance(caps_str, str) else set()
+            return f
+        return decorator
 
 # ----------------------------------------------------------------------
 # Helper to run a command and return its output (or a short error string)
