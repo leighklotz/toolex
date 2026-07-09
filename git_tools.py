@@ -4,11 +4,6 @@ import sys
 from typing import Dict, List, Optional
 from tooling import tool, run_tool, bash_wrap, discover_tools
 
-# ----------------------------------------------------------------------
-# Public tools
-# ----------------------------------------------------------------------
-
-
 @tool("read")
 @bash_wrap("git_status", ["git", "status"])
 def get_git_status(args: Optional[str] = "") -> Dict[str, str]: pass
@@ -20,6 +15,10 @@ def get_git_diff(args: Optional[str] = "") -> Dict[str, str]: pass
 @tool("read")
 @bash_wrap("git_branch", ["git", "branch"])
 def get_git_branch(args: Optional[str] = "") -> Dict[str, str]: pass
+
+@tool("read")
+@bash_wrap("git_log", ["git", "log"])
+def get_git_log(args: Optional[str] = "") -> Dict[str, str]: pass
 
 @tool("write")
 @bash_wrap("git_merge", ["git", "merge"])
@@ -36,6 +35,5 @@ def do_git_pull(args: Optional[str] = "") -> Dict[str, str]: pass
 @tool("write")
 @bash_wrap("git_rebase", ["git", "rebase"])
 def do_git_rebase(args: Optional[str] = "") -> Dict[str, str]: pass
-
 
 __all__ = discover_tools(globals(), __name__)
