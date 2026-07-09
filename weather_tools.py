@@ -12,7 +12,7 @@ from tooling import tool, run_tool, discover_tools
 def get_weather(location: str) -> Dict[str, str]:
     """Return weather for a given location."""
     location = location.strip().lower()
-    print(f"🤖 weather {location}", file=sys.stderr)
+    print(f"🤖 weather {location}", file=sys.stderr, end='')
     if location in {"paris", "london"}:
         return {"temperature": "14°C", "condition": "partly cloudy"}
     return {"temperature": "unknown", "condition": "unknown"}
