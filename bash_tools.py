@@ -2,7 +2,7 @@
 
 import sys
 from typing import Dict, List, Optional
-from tooling import tool, run_tool, bash_wrap
+from tooling import tool, run_tool, bash_wrap, discover_tools
 
 # ----------------------------------------------------------------------
 # Public tools
@@ -52,12 +52,13 @@ def run_command(command: str) -> str:
     import subprocess
     try:
         result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
-        return result.stdout + "\n" + result.stderr
+        if result.stderr:
+            return result.stdout + "\nstderr:\n" + result.stderr
+        else:
+            return result.stdout
     except subprocess.CalledProcessError as e:
         return f"Error running command: {e.stderr}\n{e.stdout}"
 
 
-__all__ = [
-    name for name, obj in globals().items() 
-    if getattr(obj, "_is_toolex_tool", False) and obj.__module__ == __name__
-]
+__all__ = discover_tools(globals(), __name__)
+

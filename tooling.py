@@ -60,7 +60,7 @@ def bash_wrap(name: str, cmd: List[str]):
         def wrapper(args: Optional[str] = "") -> Dict[str, str]:
             # Format the command string for logging/printing as seen in get_git_status
             cmd_label = " ".join(cmd)
-            print(f"🤖 {cmd_label} {args}", file=sys.stderr)
+            print(f"🤖 {cmd_label} {args}", file=sys.stderr, end='')
             return run_tool(name, cmd, args)
         return wrapper
     return decorator
@@ -97,3 +97,15 @@ def run_tool(name: str, cmd: List[str], args: str) -> Dict[str, str]:
         return {name: f"Error: {exc}"}
     except Exception as exc:  # pragma: no cover
         return {name: f"Unknown error: {exc}"}
+
+def discover_tools(namespace: Dict[str, Any], module_name: str) -> List[str]:
+    """
+    Scans a namespace to identify tool names belonging to a specific module.
+    Used primarily to populate __all__ for clean exports.
+    """
+    return [
+        name for name, obj in namespace.items() 
+        if getattr(obj, "_is_toolex_tool", False) 
+        and getattr(obj, "__module__", None) == module_name
+    ]
+
