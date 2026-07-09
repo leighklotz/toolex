@@ -331,9 +331,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--tools",
-        action="append",
+        nargs="+",  # Changed from action="append" to nargs="+"
         default=[],
-        help="Add a tool name (e.g foo or git:read). Automatically maps to <foo>_tool.py",
+        help="List of tools/permissions (e.g., --tools git weather:read)",
     )
     parser.add_argument(
         "--log-level",
