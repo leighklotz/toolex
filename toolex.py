@@ -181,7 +181,8 @@ def main(args):
             print(MAGIC_HEADER)
             print(json.dumps(messages, default=str))
 
-        _ui_status("💭")
+        #_ui_status("💭")
+        _ui_status("🛠️")
 
         try:
             j = {"messages": messages, "tools": TOOLS}
