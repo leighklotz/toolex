@@ -126,14 +126,6 @@ def execute_tool(tool_module_obj, tool_func_name: str, *args, **kwargs):
     except Exception as exc:
         raise RuntimeError(f"Execution of tool {tool_func_name!r} failed: {exc}") from exc
 
-    logger.debug(
-        "execute_tool('%s') → %s (args=%s, kwargs=%s)",
-        tool_func_name,
-        json.dumps(result, default=str),
-        args,
-        kwargs,
-    )
-
     return result
 
 
@@ -151,9 +143,7 @@ def main(args):
     header_line = sys.stdin.readline().strip()
     try:
         if header_line:
-            logger.debug(f"{header_line=}\n")
             messages = json.load(sys.stdin)
-            logger.debug(f"Loaded message history from stdin via --pipe: {messages=}")
     except Exception:
         logger.error(
             f"Failed to parse JSON from stdin: {header_line=}",
@@ -194,7 +184,6 @@ def main(args):
         try:
             j = {"messages": messages, "tools": TOOLS}
             response = requests.post(URL, json=j).json()
-            logger.debug(f"inference: {j}")
         except Exception as e:
             logger.error(f"Request failed: {e}")
             break
@@ -218,7 +207,6 @@ def main(args):
             for call in assistant_msg["tool_calls"]:
                 fn = call["function"]
                 name, arguments = fn["name"], json.loads(fn["arguments"])
-                logger.debug(f"Calling {name}({arguments})")
 
                 # Find the module and tool via mapping logic
                 # Since tools in OpenAI schema are just function names, 
@@ -308,8 +296,6 @@ def build_tools_filtered(modules, permission_map):
         # Get the set of permissions for this module
         granted_permissions = permission_map.get(modname, set())
         
-        logger.debug(f"Checking mod={modname}, granted_perms={granted_permissions}")
-
         for name, obj in inspect.getmembers(mod, inspect.isfunction):
             if getattr(obj, "_is_toolex_tool", False):
                 # The tool's specific requirement (should be a set)
