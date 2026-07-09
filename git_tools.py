@@ -38,9 +38,6 @@ def do_git_pull(args: Optional[str] = "") -> Dict[str, str]: pass
 def do_git_rebase(args: Optional[str] = "") -> Dict[str, str]: pass
 
 
-# ----------------------------------------------------------------------
-# Tool discovery
-# ----------------------------------------------------------------------
 __all__ = [
     name for name, obj in globals().items() 
     if getattr(obj, "_is_toolex_tool", False) and obj.__module__ == __name__

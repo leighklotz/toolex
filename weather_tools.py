@@ -23,10 +23,8 @@ def get_location() -> Dict[str, str]:
     print(f"🤖 get_location", file=sys.stderr)
     return { "location": "paris" }
 
-# ----------------------------------------------------------------------
-# Tool discovery
-# ----------------------------------------------------------------------
+
 __all__ = [
-    "get_weather",
-    "get_location",
+    name for name, obj in globals().items() 
+    if getattr(obj, "_is_toolex_tool", False) and obj.__module__ == __name__
 ]

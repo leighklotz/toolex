@@ -64,28 +64,7 @@ def search_files(file_pattern: str, search_string: str) -> str:
                 print(f"Error reading file {filepath}: {e}")
     return "\n".join(results)
 
-@tool("read")
-def wc(file_path: str) -> str:
-    """Returns the line, word, and character count of a file."""
-    print(f"🤖 wc {file_path}", file=sys.stderr)
-    try:
-        with open(file_path, 'r') as f:
-            content = f.read()
-            lines = content.splitlines()
-            line_count = len(lines)
-            word_count = len(content.split())
-            char_count = len(content)
-            return f"Lines: {line_count}, Words: {word_count}, Characters: {char_count}"
-    except FileNotFoundError:
-        return f"Error: File not found at {file_path}"
-    except Exception as e:
-        return f"Error running wc: {e}"
-
 __all__ = [
-    "read_file",
-    "write_file",
-    "edit_file",
-    "search_files",
-    "wc"
+    name for name, obj in globals().items() 
+    if getattr(obj, "_is_toolex_tool", False) and obj.__module__ == __name__
 ]
-

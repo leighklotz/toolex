@@ -35,6 +35,10 @@ def get_find(args: Optional[str] = "") -> Dict[str, str]: pass
 @bash_wrap("df", ["df"])
 def get_df(args: Optional[str] = "") -> Dict[str, str]: pass
 
+@tool("read")
+@bash_wrap("wc", ["wc"])
+def get_wc(args: Optional[str] = "") -> Dict[str, str]: pass
+
 @tool("write")
 @bash_wrap("rm", ["rm"])
 def do_rm(args: Optional[str] = "") -> Dict[str, str]: 
@@ -53,9 +57,6 @@ def run_command(command: str) -> str:
         return f"Error running command: {e.stderr}\n{e.stdout}"
 
 
-# ----------------------------------------------------------------------
-# Tool discovery
-# ----------------------------------------------------------------------
 __all__ = [
     name for name, obj in globals().items() 
     if getattr(obj, "_is_toolex_tool", False) and obj.__module__ == __name__
