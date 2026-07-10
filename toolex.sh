@@ -5,8 +5,15 @@ ANSWER_BIN_DIR=~/wip/answer/bin
 TOOLEX_PY=~/wip/toolex/toolex.py
 
 source "${ANSWER_BIN_DIR}/env.sh"
-if [ -f "${SCRIPT_DIR}/.venv/bin/activate" ]; then
-    source "${SCRIPT_DIR}/.venv/bin/activate"
-fi
 
-"${TOOLEX_PY}" "$@"
+if [ -f "${SCRIPT_DIR}/.venv/bin/activate" ]; then
+    # Pip-style: Use the local virtual environment if it exists
+    source "${SCRIPT_DIR}/.venv/bin/activate"
+    python "$TOOLEX_PY" "$@"
+elif command -v uv > /dev/null 2>&1; then
+    # UV-style: Run via uv (automatically handles dependencies from pyproject.toml)
+    uv run -- python "$TOOLEX_PY" "$@"
+else
+    # Fallback to system Python
+    python3 "$TOOLEX_PY" "$@"
+fi

@@ -1,3 +1,5 @@
+# file README.md
+```markdown
 # toolex – LLM tooling
 
 `toolex` is a lightweight framework that turns ordinary Python functions into LLM‑ready tools that can be called from an OpenAI‑compatible API. The framework is intentionally small, making it easy to add new tools and keep your codebase self‑contained.
@@ -26,18 +28,35 @@
 
 ## Getting started
 
+### 1. Install dependencies
+
+You can set up the environment using either `uv` (recommended) or standard `pip`.
+
+**Using `uv`:**
 ```bash
-# 1. Install dependencies
+uv sync
+```
+
+**Using `pip` and `venv`:**
+```bash
 mkvenv
-pip install -r requirements.txt   # (requirements.py/pytest omitted for brevity)
+# Ensure you are in your virtual environment before proceeding
+source .venv/bin/activate 
+pip install -r requirements.txt
+```
 
-# 2. Start a local OpenAI mimic (e.g. via `fairseq-openai` or `wml.llm`)
+### 2. Start a local OpenAI mimic (e.g. via `fairseq-openai` or `wml.llm`)
+```bash
 export VIA_API_CHAT_BASE="http://127.0.0.1:5000"
+```
 
-# 3. Run the client with a tool
+### 3. Run the client with a tool
+```bash
 ./toolex.py --tools git "What is the current status of the repository?"
+```
 
-# 4. Run the client with multiple tools
+### 4. Run the client with multiple tools
+```bash
 ./toolex.py --tools git weather "What is the ratio of git commits to current temperature in Paris?"
 ```
 
@@ -108,7 +127,7 @@ echo no changes
 `toolex.py` is designed to be used within agentic pipelines via `stdin` and `stdout`. It can ingest an existing OpenAI-style message history in JSON format, resolve tool calls, and output the updated conversation array back to a pipe.
 
 * **Input:** If valid JSON representing a list of messages is provided on `stdin`, the client treats it as the starting conversation state.
-* **Output:** The script outputs a magic header (`Content-Type: application/x-llm-history+json`) followed by the updated, tool-resolved JSON history to `stdout`.
+* **Output:** The script outputs a magic header (`Content-Type: application/x-llm-history+json`) followed by the updated, tool‑resolved JSON history to `stdout`.
 
 This allows for complex shell orchestration like:
 `ask "my prompt" | tools git --tools bash | answer`
@@ -120,4 +139,3 @@ Convenience wrapper for systems where the binary is installed in `~/wip/toolex`.
 ```bash
 ./toolex.sh --tools git "What's up?"
 ```
-
