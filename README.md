@@ -1,5 +1,3 @@
-# file README.md
-```markdown
 # toolex – LLM tooling
 
 `toolex` is a lightweight framework that turns ordinary Python functions into LLM‑ready tools that can be called from an OpenAI‑compatible API. The framework is intentionally small, making it easy to add new tools and keep your codebase self‑contained.
