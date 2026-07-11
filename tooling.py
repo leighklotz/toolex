@@ -6,6 +6,8 @@ from __future__ import annotations
 import os
 import sys
 import subprocess
+import shlex
+
 from typing import Dict, List, Optional
 from functools import wraps  # Added to preserve function metadata
 
@@ -49,7 +51,7 @@ def tool(capabilities=None):
 def bash_wrap(name: str, cmd: List[str]):
     """
     Decorator that wraps a function into a standard command-execution pattern.
-    It replaces the function's body with logic that prints the command and calls run_tool.
+    It replaces the function's body with logic that prints the command and calls run_bash_tool.
 
     Args:
         name: The key used in the returned dictionary.
@@ -61,42 +63,39 @@ def bash_wrap(name: str, cmd: List[str]):
             # Format the command string for logging/printing as seen in get_git_status
             cmd_label = " ".join(cmd)
             print(f"🤖 {cmd_label} {args}", file=sys.stderr, end='')
-            return run_tool(name, cmd, args)
+            return run_bash_tool(name, cmd, args)
         return wrapper
     return decorator
 
 # ----------------------------------------------------------------------
 # Helper to run a command and return its output (or a short error string)
 # ----------------------------------------------------------------------
-def run_tool(name: str, cmd: List[str], args: str) -> Dict[str, str]:
+
+def run_bash_tool(name: str, cmd: List[str], args: str) -> Dict[str, str]:
     """
     Run a command and return its standard output as a string.
-
-    Parameters
-    ----------
-    name:
-        Logical name of the command – used as the key in the returned dict.
-    cmd:
-        Base command split into individual elements.
-    args:
-        Optional space‑separated additional arguments to be appended to `cmd`.
     """
     if args:
         args = args.strip()
+    
     if args:
-        cmd = cmd + args.split(' ')
+        # Use shlex.split to respect quotes (e.g., '"my branch"' stays one token)
+        # instead of .split(' ') which breaks on every space.
+        cmd = cmd + shlex.split(args)
+        
     try:
         output = subprocess.check_output(
             cmd,
-            cwd=os.getcwd(),          # keep within the current working dir
-            stderr=subprocess.STDOUT,  # capture errors too
-            text=True,                # bytes → str
+            cwd=os.getcwd(),          
+            stderr=subprocess.STDOUT,  
+            text=True,                
         )
         return {name: output.strip()}
     except subprocess.CalledProcessError as exc:
         return {name: f"Error: {exc}"}
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc: 
         return {name: f"Unknown error: {exc}"}
+
 
 def discover_tools(namespace: Dict[str, Any], module_name: str) -> List[str]:
     """

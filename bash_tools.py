@@ -2,7 +2,7 @@
 
 import sys
 from typing import Dict, List, Optional
-from tooling import tool, run_tool, bash_wrap, discover_tools
+from tooling import tool, run_bash_tool, bash_wrap, discover_tools
 
 # ----------------------------------------------------------------------
 # Public tools
