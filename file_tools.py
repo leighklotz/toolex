@@ -7,7 +7,7 @@ from tooling import tool, run_tool, discover_tools
 @tool("read")
 def read_file(file_path: str) -> str:
     """Returns the contents of a file as text."""
-    print(f"🤖 reading file: {file_path}", file=sys.stderr)
+    print(f"🤖📥{file_path}", file=sys.stderr, end='')
     try:
         with open(file_path, "r") as f:
             return f.read()
@@ -19,7 +19,7 @@ def read_file(file_path: str) -> str:
 @tool("write")
 def write_file(file_path: str, content: str) -> str:
     """Writes content to a file, creating it if it does not exist."""
-    print(f"🤖 writing to file: {file_path}", file=sys.stderr)
+    print(f"🤖💾{file_path}", file=sys.stderr, end='')
     try:
         with open(file_path, "w") as f:
             f.write(content)
@@ -30,7 +30,7 @@ def write_file(file_path: str, content: str) -> str:
 @tool("write")
 def edit_file(file_path: str, edit_instructions: str) -> str:
     """Applies a specific change to an existing file."""
-    print(f"🤖 editing file: {file_path}", file=sys.stderr)
+    print(f"🤖📝✒️ {file_path}", file=sys.stderr, end='')
     try:
         file_content = read_file(file_path)
         if "Error" in file_content:
@@ -48,8 +48,8 @@ def edit_file(file_path: str, edit_instructions: str) -> str:
 
 @tool("read")
 def search_files(file_pattern: str, search_string: str) -> str:
-    """Searches file contents for a pattern."""
-    print(f"🤖 searching files for '{search_string}' in '{file_pattern}'", file=sys.stderr)
+    """Search file contents for a pattern."""
+    print(f"🤖🔍'{search_string}' in '{file_pattern}'", file=sys.stderr, end='')
     import glob
     import os
 
