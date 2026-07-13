@@ -80,7 +80,7 @@ The client will:
 
 Example output (when changes exist):
 
-```bash
+````bash
 🤖 git status
 git status
 
@@ -100,6 +100,7 @@ If there are no changes to commit:
 ```bash
 echo no changes
 ```
+````
 
 ## Extending the system
 
