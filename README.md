@@ -93,10 +93,13 @@ git commit -a \
   -m "Add new utility functions" \
   -m "Refactor CLI handling" \
   -m "Update README"
-```
+\```
+````
 
 If there are no changes to commit:
 
+````
+🤖
 ```bash
 echo no changes
 ```
@@ -120,7 +123,7 @@ echo no changes
   # Mixing multiple modules with different permissions
   ./toolex.py --tools bash:read --tools git:write "List files and then commit them"
 ```
-````
+
 
 ## Pipeline Mode (JSON)
 
