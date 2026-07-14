@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import os
@@ -47,9 +47,13 @@ def bash_wrap(name: str, cmd: List[str]):
         @wraps(f)
         def wrapper(*args, **kwargs) -> Dict[str, Any]:
             cmd_label = " ".join(cmd)
-            # Print to stderr so it doesn't pollute the JSON/LLM stdout stream
-            print(f"🤖 Executing: {cmd_label} with args={args}", file=sys.stderr)
-            return run_bash_tool(name, cmd, str(args[0]) if args else "")
+            # Extract the first positional argument as the command-line arguments string.
+            # If it's already a dict/list (unlikely for shell tools), we treat payload as empty to avoid corruption.
+            arg_payload = str(args[0]) if args and not isinstance(args[0], (dict, list)) else ""
+            
+            # Improved logging: Wrap arg_payload in quotes to clearly see whitespace/empty values during debug
+            print(f"🤖 Executing: {cmd_label} with args='{arg_payload}'", file=sys.stderr)
+            return run_bash_tool(name, cmd, arg_payload)
         return wrapper
     return decorator
 
