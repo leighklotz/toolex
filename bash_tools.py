@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 
 import sys
+import subprocess
 from typing import Dict, List, Optional
 from tooling import tool, run_bash_tool, bash_wrap, discover_tools
+
+
 
 # ----------------------------------------------------------------------
 # Public tools
@@ -66,20 +69,3 @@ def get_grep(args: Optional[str] = "") -> Dict[str, str]:
 def do_rm(args: Optional[str] = "") -> Dict[str, str]: 
     """Remove files or directories. Args: target paths and flags (e.g., '-rf')."""
     raise Exception("rm is not implemented")
-
-@tool("write exec")
-def run_command(command: str) -> str:
-    """Execute arbitrary shell command via bash. Args: full command string."""
-    print(f"🤖 running command: {command}", file=sys.stderr, end='')
-    import subprocess
-    try:
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
-        if result.stderr:
-            return result.stdout + "\nstderr:\n" + result.stderr
-        else:
-            return result.stdout
-    except subprocess.CalledProcessError as e:
-        return f"Error running command: {e.stderr}\n{e.stdout}"
-
-
-__all__ = discover_tools(globals(), __name__)

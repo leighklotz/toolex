@@ -2,7 +2,7 @@
 
 import sys
 from typing import Dict, List, Optional
-from tooling import tool, run_tool, discover_tools
+from tooling import tool, discover_tools
 
 @tool("read")
 def read_file(file_path: str) -> str:
