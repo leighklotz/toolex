@@ -2,7 +2,7 @@
 
 `toolex` is a lightweight framework that turns ordinary Python functions into LLM‑ready tools that can be called from an OpenAI‑compatible API. The framework is intentionally small, making it easy to add new tools and keep your codebase self‑contained.
 
-`toolex` is designed to work with [`answer`](https://github.com/leighklotz/answer)
+`toolex` is designed to be a part of [`answer`](https://github.com/leighklotz/answer). Below is standalone documentation.
 
 ## Project layout
 

@@ -1,111 +1,93 @@
-#!/usr/bin/env python
-"""Command‑line utilities for simple git interaction and other helpers."""
-
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import os
 import sys
 import subprocess
-from typing import Dict, List, Optional
-from functools import wraps  # Added to preserve function metadata
+import shlex
+from typing import Dict, List, Optional, Any, Union, Callable
+from functools import wraps
 
-# ----------------------------------------------------------------------
-# Decorator that marks a function as a tool
-# ----------------------------------------------------------------------
-def tool(capabilities=None):
+def tool(capabilities: Union[str, List[str], Callable] = None):
     """
-    Decorator for toolex tools with permission-based filtering.
-    Usage: 
-        @tool | @tool()      -> No capabilities
-        @tool('write')       -> Single capability
-        @tool('read exec')   -> Multiple capabilities
+    Decorator that marks a function as an LLM-callable tool with specific permissions.
+    Handles various calling styles for flexibility:
+        @tool                 -> No capabilities (defaults to empty set)
+        @tool("write")         -> Single capability string
+        @tool(["read", "exec"]) -> Multiple capabilities list/tuple
+        @tool()                -> Explicitly no capabilities
     """
+    # Case 1: User used @tool (no parentheses). 'capabilities' is the function being decorated.
     if callable(capabilities):
         func = capabilities
-        caps_str = ""
-    else:
-        func = None
-        caps_str = capabilities or ""
+        func._is_toolex_tool = True
+        func._required_caps = set()
+        return func
 
-    def wrap_decorator(f):
+    def decorator(f: Callable) -> Callable:
+        """The actual decorator that attaches metadata to the function."""
+        # Determine if we are using a list/tuple or splitting a string
+        if isinstance(capabilities, str):
+            caps_set = set(capabilities.split())
+        elif isinstance(capabilities, (list, tuple)):
+            caps_set = set(capabilities)
+        else:
+            caps_set = set()
+
         f._is_toolex_tool = True
-        f._required_caps = set(caps_str.split()) if isinstance(caps_str, str) else set()
+        f._required_caps = caps_set
         return f
 
-    if callable(capabilities):
-        # @tool
-        return wrap_decorator(func)
-    else:
-        # @tool('read') or @tool() 
-        def decorator(f):
-            f._is_toolex_tool = True
-            f._required_caps = set(caps_str.split()) if isinstance(caps_str, str) else set()
-            return f
-        return decorator
+    # Case 2 & 3: User used @tool(...) or @tool(). Return the decorator factory.
+    return decorator
 
-# ----------------------------------------------------------------------
-# Implement bash_wrap to reduce boilerplate for shell commands
-# ----------------------------------------------------------------------
 def bash_wrap(name: str, cmd: List[str]):
-    """
-    Decorator that wraps a function into a standard command-execution pattern.
-    It replaces the function's body with logic that prints the command and calls run_tool.
-
-    Args:
-        name: The key used in the returned dictionary.
-        cmd: The list of base command arguments (e.g., ["git", "status"]).
-    """
-    def decorator(f):
+    """Wraps a function into a standard command-execution pattern for logging."""
+    def decorator(f: Callable) -> Callable:
         @wraps(f)
-        def wrapper(args: Optional[str] = "") -> Dict[str, str]:
-            # Format the command string for logging/printing as seen in get_git_status
+        def wrapper(*args, **kwargs) -> Dict[str, Any]:
             cmd_label = " ".join(cmd)
-            print(f"🤖 {cmd_label} {args}", file=sys.stderr, end='')
-            return run_tool(name, cmd, args)
+            # Extract the first positional argument as the command-line arguments string.
+            # If it's already a dict/list (unlikely for shell tools), we treat payload as empty to avoid corruption.
+            arg_payload = str(args[0]) if args and not isinstance(args[0], (dict, list)) else ""
+            
+            # Improved logging: Wrap arg_payload in quotes to clearly see whitespace/empty values during debug
+            print(f"🤖 Executing: {cmd_label} with args='{arg_payload}'", file=sys.stderr)
+            return run_bash_tool(name, cmd, arg_payload)
         return wrapper
     return decorator
 
-# ----------------------------------------------------------------------
-# Helper to run a command and return its output (or a short error string)
-# ----------------------------------------------------------------------
-def run_tool(name: str, cmd: List[str], args: str) -> Dict[str, str]:
-    """
-    Run a command and return its standard output as a string.
-
-    Parameters
-    ----------
-    name:
-        Logical name of the command – used as the key in the returned dict.
-    cmd:
-        Base command split into individual elements.
-    args:
-        Optional space‑separated additional arguments to be appended to `cmd`.
-    """
-    if args:
-        args = args.strip()
-    if args:
-        cmd = cmd + args.split(' ')
+def run_bash_tool(name: str, cmd: List[str], args: Optional[str] = "") -> Dict[str, Any]:
+    """Runs a shell command and returns output as a dictionary."""
+    # Ensure we have a clean string to work with
+    args_str = (args or "").strip()
+    
+    # Create a new list so we don't mutate the original 'cmd' list passed in
+    full_cmd = list(cmd)
+    if args_str:
+        # Use shlex to split arguments correctly (respecting quotes)
+        full_cmd += shlex.split(args_str)
+        
     try:
         output = subprocess.check_output(
-            cmd,
-            cwd=os.getcwd(),          # keep within the current working dir
-            stderr=subprocess.STDOUT,  # capture errors too
-            text=True,                # bytes → str
+            full_cmd,
+            cwd=os.getcwd(),          
+            stderr=subprocess.STDOUT,  
+            text=True,                
         )
         return {name: output.strip()}
     except subprocess.CalledProcessError as exc:
-        return {name: f"Error: {exc}"}
-    except Exception as exc:  # pragma: no cover
-        return {name: f"Unknown error: {exc}"}
+        # Return detailed error for LLM debugging (exit code + stderr/stdout content)
+        error_msg = f"Command Error (Exit Code {exc.returncode}):\n{exc.output}"
+        return {name: error_msg}
+    except Exception as exc: 
+        # Catch-all for system errors like 'file not found' or permission issues
+        return {name: f"System Error: {str(exc)}"}
 
 def discover_tools(namespace: Dict[str, Any], module_name: str) -> List[str]:
-    """
-    Scans a namespace to identify tool names belonging to a specific module.
-    Used primarily to populate __all__ for clean exports.
-    """
+    """Scans namespace for tools belonging to the current module."""
     return [
         name for name, obj in namespace.items() 
         if getattr(obj, "_is_toolex_tool", False) 
         and getattr(obj, "__module__", None) == module_name
     ]
-
