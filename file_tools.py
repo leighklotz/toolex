@@ -9,7 +9,7 @@ def read_file(
     file_path: Annotated[str, "The path to the file you wish to read. Can be relative or absolute."]
 ) -> str:
     """Returns the contents of a text file as a single string."""
-    print(f"🤖📥{file_path}", file=sys.stderr, end='')
+    print(f" 🤖📥{file_path}", file=sys.stderr, end='')
     try:
         with open(file_path, "r") as f:
             return f.read()
@@ -24,7 +24,7 @@ def write_file(
     content: Annotated[str, "The full string content to write into the file."]
 ) -> str:
     """Writes text content to a file, overwriting existing content or creating new files."""
-    print(f"🤖💾{file_path}", file=sys.stderr, end='')
+    print(f" 🤖💾{file_path}", file=sys.stderr, end='')
     try:
         with open(file_path, "w") as f:
             f.write(content)
@@ -38,7 +38,7 @@ def edit_file(
     edit_instructions: Annotated[str, "A string containing replacement instructions using the format 'replace:old_text:new_text'. Example: 'replace:hello:hi'"]
 ) -> str:
     """Applies a specific text substitution to an existing file. Requires precise formatting."""
-    print(f"🤖📝✒️ {file_path}", file=sys.stderr, end='')
+    print(f" 🤖📝✒️ {file_path}", file=sys.stderr, end='')
     try:
         # Re-using logic from the user prompt but ensuring it's contained in this module context
         with open(file_path, "r") as f:
@@ -68,7 +68,7 @@ def search_files(
     search_string: Annotated[str, "The literal text string you are looking for within the files."]
 ) -> str:
     """Searches through multiple files matching a pattern and returns names of files containing the search string."""
-    print(f"🤖🔍'{search_string}' in '{file_pattern}'", file=sys.stderr, end='')
+    print(f" 🤖🔍'{search_string}' in '{file_pattern}'", file=sys.stderr, end='')
     import glob
     import os
 
