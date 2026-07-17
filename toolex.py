@@ -90,15 +90,7 @@ def generate_openai_schema(obj):
         },
     }
 
-def build_tools_from_module(module):
-    """Return a list of OpenAI‑style tool dicts from a module."""
-    tools = []
-    for name, obj in inspect.getmembers(module, inspect.isfunction):
-        if getattr(obj, "_is_toolex_tool", False):
-            tools.append(generate_openai_schema(obj))
-    return tools
-
-def build_tools_filtered(modules: List[Any], permission_map: Dict[str, set]):
+def build_tools_from_modules(modules: List[Any], permission_map: Dict[str, set]):
     """Filters tools based on requested permissions."""
     tools = []
     for mod in modules:
@@ -146,7 +138,6 @@ def execute_tool(tool_module_obj, tool_func_name: str, *args, **kwargs):
 
 def find_module_for_func(mod_registry: Dict[str, Any], func_name: str):
     """Helper to locate which loaded module contains a specific function name."""
-    # Use the mapping built during execution setup to avoid global state dependency issues
     if func_name in mod_registry:
         return mod_registry[func_name]
     raise ValueError(f"Could not find registered tool function: {func_name}")
@@ -167,7 +158,6 @@ def parse_permissions(args_list):
                 sys.exit(1)
             mapping[modname] = set()
 
-        # We need to load the module temporarily to validate perms if it's a specific perm request
         module = importlib.import_module(modname)
         valid_perms = set()
         for name, obj in inspect.getmembers(module, inspect.isfunction):
@@ -218,9 +208,9 @@ def main(args):
         except ImportError as e:
             raise ImportError(f"Tool module {modname} does not exist") from e
 
-    TOOLS = build_tools_filtered(MODS_LIST, permission_map)
-    
+    TOOLS = build_tools_from_modules(MODS_LIST, permission_map)
     TOTAL_ITERATIONS = 10
+    executed_states = set()
     for i in range(TOTAL_ITERATIONS):
         # If assistant is done thinking and has no tool calls, it's a final response
         if (
@@ -246,11 +236,47 @@ def main(args):
         choice = response["choices"][0]
         if choice.get("finish_reason") == "tool_calls":
             assistant_msg = choice["message"]
-            messages.append({
+
+            # --- LOOP BREAKER: State Extraction & Check ---
+            current_turn_calls = tuple(
+                (call["function"]["name"], call["function"]["arguments"])
+                for call in assistant_msg.get("tool_calls", [])
+            )
+
+            if current_turn_calls in executed_states:
+                logger.warning("Stall detected: LLM generated identical tool arguments as a previous turn.")
+                
+                messages.append({
+                    "role": "user",
+                    "content": "[System Error: Infinite execution loop terminated. You are passing identical parameters back to the same tool. Abandon this loop and summarize your progress immediately.]"
+                })
+                
+                try:
+                    final_resp = requests.post(URL, json={"messages": messages}).json()
+                    if "choices" in final_resp and len(final_resp["choices"]) > 0:
+                        messages.append(final_resp["choices"][0]["message"])
+                except Exception as e:
+                    logger.error(f"Failed to fetch graceful loop exit response: {e}")
+                    
+                print(MAGIC_HEADER)
+                print(json.dumps(messages, default=str))
+                break
+                
+            executed_states.add(current_turn_calls)
+
+            # Build the message to append back into history
+            history_entry = {
                 "role": "assistant",
                 "content": assistant_msg.get("content"),
-                "tool_calls": assistant_msg["tool_calls"],
-            })
+                "tool_calls": assistant_msg.get("tool_calls") or [],
+            }
+
+            # if keep_reasoning, maintain logic/context chain
+            if args.keep_reasoning and "reasoning_content" in assistant_msg:
+                history_entry["reasoning_content"] = assistant_msg["reasoning_content"]
+                logger.debug("Appended ```\nassistant_msg.reasoning_content='%s'```\nto\n```\nhistory_entry.reasoning_content to get history_entry='%s'```\n" % (assistant_msg["reasoning_content"], json.dumps(history_entry)))
+
+            messages.append(history_entry)
 
             for call in assistant_msg["tool_calls"]:
                 fn = call["function"]
@@ -278,7 +304,7 @@ def main(args):
                     "content": json.dumps(result, default=str),
                 })
         else:
-            # Final response from Assistant
+            # Final response from Assistant (already contains all fields including reasoning)
             messages.append(choice["message"])
             print(MAGIC_HEADER)
             print(json.dumps(messages))
@@ -308,6 +334,11 @@ if __name__ == "__main__":
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         default="INFO",
         help="Set the logging level (default: INFO)",
+    )
+    parser.add_argument(
+        "--keep-reasoning",
+        action="store_true",
+        help="Keep reasoning_content in tool call history to maintain complex logic chains.",
     )
     args = parser.parse_args()
     main(args)
