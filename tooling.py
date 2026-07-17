@@ -56,7 +56,7 @@ def bash_wrap(name: str, cmd: List[str]):
                 arg_payload = ""
 
             # Improved logging: Wrap arg_payload in quotes to clearly see whitespace/empty values during debug
-            print(f"🤖 Executing: {cmd_label} with args='{arg_payload}'", file=sys.stderr)
+            print(f"🤖{cmd_label} {arg_payload}", file=sys.stderr, end='')
             return run_bash_tool(name, cmd, arg_payload)
         return wrapper
     return decorator

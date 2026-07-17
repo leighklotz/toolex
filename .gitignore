@@ -3,5 +3,5 @@
 .hallux/
 .venv/
 __pycache__/
-
+.hallux/
 .DS_Store
