@@ -90,15 +90,7 @@ def generate_openai_schema(obj):
         },
     }
 
-def build_tools_from_module(module):
-    """Return a list of OpenAI‑style tool dicts from a module."""
-    tools = []
-    for name, obj in inspect.getmembers(module, inspect.isfunction):
-        if getattr(obj, "_is_toolex_tool", False):
-            tools.append(generate_openai_schema(obj))
-    return tools
-
-def build_tools_filtered(modules: List[Any], permission_map: Dict[str, set]):
+def build_tools_from_modules(modules: List[Any], permission_map: Dict[str, set]):
     """Filters tools based on requested permissions."""
     tools = []
     for mod in modules:
@@ -218,7 +210,7 @@ def main(args):
         except ImportError as e:
             raise ImportError(f"Tool module {modname} does not exist") from e
 
-    TOOLS = build_tools_filtered(MODS_LIST, permission_map)
+    TOOLS = build_tools_from_modules(MODS_LIST, permission_map)
     
     TOTAL_ITERATIONS = 10
     for i in range(TOTAL_ITERATIONS):
