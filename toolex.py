@@ -5,7 +5,7 @@
 # or
 # ask "what is the weather in paris" | toolex.py --tools git --tools weather | answer
 # or (for specific permissions)
-# ask "read file" | toolex.py --tools git:read
+# ask "read file" | toolex.py --tools git
 
 import logging
 import importlib
@@ -271,10 +271,10 @@ def main(args):
                 "tool_calls": assistant_msg.get("tool_calls") or [],
             }
 
-            # if keep_reasoning, maintain logic/context chain
-            if args.keep_reasoning and "reasoning_content" in assistant_msg:
+            # If not drop_reasoning, maintain logic/context chain
+            if not args.drop_reasoning and "reasoning_content" in assistant_msg:
                 history_entry["reasoning_content"] = assistant_msg["reasoning_content"]
-                logger.debug("Appended ```\nassistant_msg.reasoning_content='%s'```\nto\n```\nhistory_entry.reasoning_content to get history_entry='%s'```\n" % (assistant_msg["reasoning_content"], json.dumps(history_entry)))
+                logger.debug("Appended reasoning content to history.")
 
             messages.append(history_entry)
 
@@ -355,9 +355,9 @@ if __name__ == "__main__":
         help="Set the logging level (default: INFO)",
     )
     parser.add_argument(
-        "--keep-reasoning",
+        "--drop-reasoning",
         action="store_true",
-        help="Keep reasoning_content in tool call history to maintain complex logic chains.",
+        help="Drop reasoning_content from tool call history, preventing the model from seeing its own thoughts in subsequent turns.",
     )
     args = parser.parse_args()
     main(args)
