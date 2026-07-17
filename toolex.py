@@ -138,7 +138,6 @@ def execute_tool(tool_module_obj, tool_func_name: str, *args, **kwargs):
 
 def find_module_for_func(mod_registry: Dict[str, Any], func_name: str):
     """Helper to locate which loaded module contains a specific function name."""
-    # Use the mapping built during execution setup to avoid global state dependency issues
     if func_name in mod_registry:
         return mod_registry[func_name]
     raise ValueError(f"Could not find registered tool function: {func_name}")
@@ -159,7 +158,6 @@ def parse_permissions(args_list):
                 sys.exit(1)
             mapping[modname] = set()
 
-        # We need to load the module temporarily to validate perms if it's a specific perm request
         module = importlib.import_module(modname)
         valid_perms = set()
         for name, obj in inspect.getmembers(module, inspect.isfunction):
@@ -238,11 +236,20 @@ def main(args):
         choice = response["choices"][0]
         if choice.get("finish_reason") == "tool_calls":
             assistant_msg = choice["message"]
-            messages.append({
+
+            # Build the message to append back into history
+            history_entry = {
                 "role": "assistant",
                 "content": assistant_msg.get("content"),
-                "tool_calls": assistant_msg["tool_calls"],
-            })
+                "tool_calls": assistant_msg.get("tool_calls") or [],
+            }
+
+            # if keep_reasoning, maintain logic/context chain
+            if args.keep_reasoning and "reasoning_content" in assistant_msg:
+                history_entry["reasoning_content"] = assistant_msg["reasoning_content"]
+                logger.trace("Appended ```\nassistant_msg.reasoning_content='%s'```\nto\n```\nhistory_entry.reasoning_content to get history_entry='%s'```\n" % (assistant_msg["reasoning_content"], json.dumps(history_entry)))
+
+            messages.append(history_entry)
 
             for call in assistant_msg["tool_calls"]:
                 fn = call["function"]
@@ -270,7 +277,7 @@ def main(args):
                     "content": json.dumps(result, default=str),
                 })
         else:
-            # Final response from Assistant
+            # Final response from Assistant (already contains all fields including reasoning)
             messages.append(choice["message"])
             print(MAGIC_HEADER)
             print(json.dumps(messages))
@@ -300,6 +307,11 @@ if __name__ == "__main__":
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         default="INFO",
         help="Set the logging level (default: INFO)",
+    )
+    parser.add_argument(
+        "--keep-reasoning",
+        action="store_true",
+        help="Keep reasoning_content in tool call history to maintain complex logic chains.",
     )
     args = parser.parse_args()
     main(args)
