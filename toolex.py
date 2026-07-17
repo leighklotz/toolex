@@ -283,8 +283,27 @@ def main(args):
                 name, arguments = fn["name"], json.loads(fn["arguments"])
 
                 try:
+                    #Get the module that contains this function
                     mod_obj = find_module_for_func(TOOL_EXECUTION_MAP, name)
-                    result = execute_tool(mod_obj, name, **arguments)
+                    
+                    # Get the actual function object from that module
+                    tool_func = getattr(mod_obj, name)
+                    
+                    # Use inspect to get the signature of the tool function
+                    sig = inspect.signature(tool_func)
+                    
+                    # Check if the function accepts **kwargs (VAR_KEYWORD)
+                    has_var_keyword = any(param.kind == inspect.Parameter.VAR_KEYWORD for param in sig.parameters.values())
+
+                    if has_var_keyword:
+                        
+                        # If it accepts **kwargs, we don't filter; all provided kwargs are valid
+                        filtered_args = arguments
+                    else:
+                        # Otherwise, only pass the keys that match defined parameters to avoid TypeError
+                        filtered_args = {k: v for k, v in arguments.items() if k in sig.parameters}
+                    # Execute with filtered arguments
+                    result = execute_tool(mod_obj, name, **filtered_args)
                 except Exception as e:
                     logger.error(f"Tool execution error: {e}")
                     # Append error to messages so LLM knows why it failed instead of crashing
