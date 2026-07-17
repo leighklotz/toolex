@@ -47,10 +47,14 @@ def bash_wrap(name: str, cmd: List[str]):
         @wraps(f)
         def wrapper(*args, **kwargs) -> Dict[str, Any]:
             cmd_label = " ".join(cmd)
-            # Extract the first positional argument as the command-line arguments string.
-            # If it's already a dict/list (unlikely for shell tools), we treat payload as empty to avoid corruption.
-            arg_payload = str(args[0]) if args and not isinstance(args[0], (dict, list)) else ""
-            
+
+            if "args" in kwargs and not isinstance(kwargs["args"], (dict, list)):
+                arg_payload = str(kwargs["args"])
+            elif args and not isinstance(args[0], (dict, list)):
+                arg_payload = str(args[0])
+            else:
+                arg_payload = ""
+
             # Improved logging: Wrap arg_payload in quotes to clearly see whitespace/empty values during debug
             print(f"🤖 Executing: {cmd_label} with args='{arg_payload}'", file=sys.stderr)
             return run_bash_tool(name, cmd, arg_payload)

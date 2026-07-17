@@ -209,8 +209,8 @@ def main(args):
             raise ImportError(f"Tool module {modname} does not exist") from e
 
     TOOLS = build_tools_from_modules(MODS_LIST, permission_map)
-    
     TOTAL_ITERATIONS = 10
+    executed_states = set()
     for i in range(TOTAL_ITERATIONS):
         # If assistant is done thinking and has no tool calls, it's a final response
         if (
@@ -237,6 +237,33 @@ def main(args):
         if choice.get("finish_reason") == "tool_calls":
             assistant_msg = choice["message"]
 
+            # --- LOOP BREAKER: State Extraction & Check ---
+            current_turn_calls = tuple(
+                (call["function"]["name"], call["function"]["arguments"])
+                for call in assistant_msg.get("tool_calls", [])
+            )
+
+            if current_turn_calls in executed_states:
+                logger.warning("Stall detected: LLM generated identical tool arguments as a previous turn.")
+                
+                messages.append({
+                    "role": "user",
+                    "content": "[System Error: Infinite execution loop terminated. You are passing identical parameters back to the same tool. Abandon this loop and summarize your progress immediately.]"
+                })
+                
+                try:
+                    final_resp = requests.post(URL, json={"messages": messages}).json()
+                    if "choices" in final_resp and len(final_resp["choices"]) > 0:
+                        messages.append(final_resp["choices"][0]["message"])
+                except Exception as e:
+                    logger.error(f"Failed to fetch graceful loop exit response: {e}")
+                    
+                print(MAGIC_HEADER)
+                print(json.dumps(messages, default=str))
+                break
+                
+            executed_states.add(current_turn_calls)
+
             # Build the message to append back into history
             history_entry = {
                 "role": "assistant",
@@ -247,7 +274,7 @@ def main(args):
             # if keep_reasoning, maintain logic/context chain
             if args.keep_reasoning and "reasoning_content" in assistant_msg:
                 history_entry["reasoning_content"] = assistant_msg["reasoning_content"]
-                logger.trace("Appended ```\nassistant_msg.reasoning_content='%s'```\nto\n```\nhistory_entry.reasoning_content to get history_entry='%s'```\n" % (assistant_msg["reasoning_content"], json.dumps(history_entry)))
+                logger.warning("Appended ```\nassistant_msg.reasoning_content='%s'```\nto\n```\nhistory_entry.reasoning_content to get history_entry='%s'```\n" % (assistant_msg["reasoning_content"], json.dumps(history_entry)))
 
             messages.append(history_entry)
 
