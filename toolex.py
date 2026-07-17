@@ -274,7 +274,7 @@ def main(args):
             # if keep_reasoning, maintain logic/context chain
             if args.keep_reasoning and "reasoning_content" in assistant_msg:
                 history_entry["reasoning_content"] = assistant_msg["reasoning_content"]
-                logger.warning("Appended ```\nassistant_msg.reasoning_content='%s'```\nto\n```\nhistory_entry.reasoning_content to get history_entry='%s'```\n" % (assistant_msg["reasoning_content"], json.dumps(history_entry)))
+                logger.debug("Appended ```\nassistant_msg.reasoning_content='%s'```\nto\n```\nhistory_entry.reasoning_content to get history_entry='%s'```\n" % (assistant_msg["reasoning_content"], json.dumps(history_entry)))
 
             messages.append(history_entry)
 
