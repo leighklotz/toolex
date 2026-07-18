@@ -122,8 +122,6 @@ echo no changes
 
   # Mixing multiple modules with different permissions
   ./toolex.py --tools bash:read --tools git:write "List files and then commit them"
-```
-
 
 ## Pipeline Mode (JSON)
 
@@ -141,4 +139,3 @@ Convenience wrapper for systems where the binary is installed in `~/wip/toolex`.
 
 ```bash
 ./toolex.sh --tools git "What's up?"
-```
