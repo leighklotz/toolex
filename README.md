@@ -45,7 +45,12 @@ pip install -r requirements.txt
 
 ### 2. Start a local OpenAI mimic (e.g. via `fairseq-openai` or `wml.llm`)
 ```bash
+# Set the base URL for your local API provider
 export VIA_API_CHAT_BASE="http://127.0.0.1:5000"
+
+# Optional: Specify a specific model name (e.g., "gpt-4o", "llama3") 
+# if required by your local server implementation.
+export LM_MODEL="default"
 ```
 
 ### 3. Run the client with a tool
@@ -62,7 +67,7 @@ The client will:
 
 1. Discover all functions decorated with `@tool`.
 2. Build the OpenAI tool schema and send the prompt.
-3. When the model decides to call a tool, the script will invoke it locally.
+3. When the model decides to call a tool, the script will invoke it locally. The client supports multi-step agentic workflows with up to 30 automatic tool iterations before concluding or timing out.
 4. The final output of the model (or your manual input) will be printed.
 
 ## Running `help-commit.sh`
@@ -139,3 +144,4 @@ Convenience wrapper for systems where the binary is installed in `~/wip/toolex`.
 
 ```bash
 ./toolex.sh --tools git "What's up?"
+```
