@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 VIA_API_CHAT_BASE = os.getenv("VIA_API_CHAT_BASE", "http://127.0.0.1:5000")
+MODEL = os.getenv("LM_MODEL", "default")
 URL = f"{VIA_API_CHAT_BASE}/v1/chat/completions"
 MAGIC_HEADER = "Content-Type: application/x-llm-history+json"
 
@@ -226,7 +227,7 @@ def main(args):
             break
 
         try:
-            j = {"messages": messages, "tools": TOOLS}
+            j = {"model": MODEL, "messages": messages, "tools": TOOLS}
             _ui_status("✨")
             response = requests.post(URL, json=j).json()
             if "choices" not in response or len(response["choices"]) == 0:
@@ -255,7 +256,9 @@ def main(args):
                 })
                 
                 try:
-                    final_resp = requests.post(URL, json={"messages": messages}).json()
+                    ## TODO: Add `"model": MODEL`
+                    _ui_status("✨")
+                    final_resp = requests.post(URL, json={"model": MODEL, "messages": messages}).json()
                     if "choices" in final_resp and len(final_resp["choices"]) > 0:
                         messages.append(final_resp["choices"][0]["message"])
                 except Exception as e:
