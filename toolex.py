@@ -17,6 +17,10 @@ import sys
 from typing import get_origin, get_args, Union, Any, Dict, List, Annotated, get_type_hints
 import argparse
 
+#TOTAL_ITERATIONS = 10
+TOTAL_ITERATIONS = 30
+
+
 # Logging
 logging.basicConfig(
     level=logging.INFO,
@@ -209,7 +213,6 @@ def main(args):
             raise ImportError(f"Tool module {modname} does not exist") from e
 
     TOOLS = build_tools_from_modules(MODS_LIST, permission_map)
-    TOTAL_ITERATIONS = 10
     executed_states = set()
     for i in range(TOTAL_ITERATIONS):
         # If assistant is done thinking and has no tool calls, it's a final response
