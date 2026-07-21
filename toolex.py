@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 VIA_API_CHAT_BASE = os.getenv("VIA_API_CHAT_BASE", "http://127.0.0.1:5000")
-MODEL = os.getenv("LM_MODEL", "default")
+MODEL = os.getenv("LM_MODEL", "gemma-4-26b-qat-batch")
 URL = f"{VIA_API_CHAT_BASE}/v1/chat/completions"
 MAGIC_HEADER = "Content-Type: application/x-llm-history+json"
 
@@ -229,7 +229,9 @@ def main(args):
         try:
             j = {"model": MODEL, "messages": messages, "tools": TOOLS}
             _ui_status("✨")
+            logger.debug(f"requests.post {URL=}")
             response = requests.post(URL, json=j).json()
+            logger.debug(f"requests.response {response=}")
             if "choices" not in response or len(response["choices"]) == 0:
                 logger.error(f"Unexpected response format: {response}")
                 break
