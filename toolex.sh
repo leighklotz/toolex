@@ -4,7 +4,10 @@ SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE}")")"
 ANSWER_BIN_DIR=~/wip/answer/bin
 TOOLEX_PY=~/wip/toolex/toolex.py
 
-source "${ANSWER_BIN_DIR}/env.sh"
+# source "${ANSWER_BIN_DIR}/env.sh"
+source "${ANSWER_BIN_DIR}/commands/enable"
+
+export MODEL=$(hx model)
 
 if [ -f "${SCRIPT_DIR}/.venv/bin/activate" ]; then
     # Pip-style: Use the local virtual environment if it exists
