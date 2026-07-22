@@ -8,6 +8,12 @@ import shlex
 from typing import Dict, List, Optional, Any, Union, Callable
 from functools import wraps
 
+# --- SANDBOX CONFIGURATION ---
+SANDBOX_CONFIG = {
+    "image": "llm-sandbox",        # The image you built with Podman
+    "host_data_dir": "/absolute/path/to/your/data", # What the LLM sees as /workspace
+}
+
 def tool(capabilities: Union[str, List[str], Callable] = None):
     """
     Decorator that marks a function as an LLM-callable tool with specific permissions.
@@ -25,8 +31,6 @@ def tool(capabilities: Union[str, List[str], Callable] = None):
         return func
 
     def decorator(f: Callable) -> Callable:
-        """The actual decorator that attaches metadata to the function."""
-        # Determine if we are using a list/tuple or splitting a string
         if isinstance(capabilities, str):
             caps_set = set(capabilities.split())
         elif isinstance(capabilities, (list, tuple)):
@@ -41,52 +45,74 @@ def tool(capabilities: Union[str, List[str], Callable] = None):
     # Case 2 & 3: User used @tool(...) or @tool(). Return the decorator factory.
     return decorator
 
+# --- HOST EXECUTION ---
 def bash_wrap(name: str, cmd: List[str]):
-    """Wraps a function into a standard command-execution pattern for logging."""
+    """Runs the command directly on host machine.
+    Wraps in a standard command-execution pattern for logging."""
     def decorator(f: Callable) -> Callable:
         @wraps(f)
         def wrapper(*args, **kwargs) -> Dict[str, Any]:
             cmd_label = " ".join(cmd)
-
-            if "args" in kwargs and not isinstance(kwargs["args"], (dict, list)):
-                arg_payload = str(kwargs["args"])
-            elif args and not isinstance(args[0], (dict, list)):
-                arg_payload = str(args[0])
-            else:
-                arg_payload = ""
-
-            # Improved logging: Wrap arg_payload in quotes to clearly see whitespace/empty values during debug
-            print(f"🤖{cmd_label} {arg_payload} ", file=sys.stderr, end='')
+            arg_payload = str(args[0]) if args and not isinstance(args[0], (dict, list)) else ""
+            print(f"🚀{' '.join(cmd)} {arg_payload}", file=sys.stderr)
             return run_bash_tool(name, cmd, arg_payload)
         return wrapper
     return decorator
 
 def run_bash_tool(name: str, cmd: List[str], args: Optional[str] = "") -> Dict[str, Any]:
-    """Runs a shell command and returns output as a dictionary."""
-    # Ensure we have a clean string to work with
+    """Runs the command directly on host machine."""
     args_str = (args or "").strip()
-    
-    # Create a new list so we don't mutate the original 'cmd' list passed in
     full_cmd = list(cmd)
     if args_str:
-        # Use shlex to split arguments correctly (respecting quotes)
         full_cmd += shlex.split(args_str)
         
     try:
         output = subprocess.check_output(
-            full_cmd,
-            cwd=os.getcwd(),          
-            stderr=subprocess.STDOUT,  
-            text=True,                
+            full_cmd, cwd=os.getcwd(), stderr=subprocess.STDOUT, text=True,                
+        )
+        return {name: output.strip()}
+    except Exception as exc: # Simplified for brevity
+        return {name: f"Error: {str(exc)}"}
+
+# --- PODMAN SANDBOX ---
+def sandbox_wrap(name: str, cmd: List[str]):
+    """Wraps a function so it executes inside a Podman container."""
+    def decorator(f: Callable) -> Callable:
+        @wraps(f)
+        def wrapper(*args, **kwargs) -> Dict[str, Any]:
+            cmd_label = " ".join(cmd)
+            arg_payload = str(args[0]) if args and not isinstance(args[0], (dict, list)) else ""
+            print(f"🛡️ [SANDBOX] {name} | Executing: {' '.join(cmd)} {arg_payload}", file=sys.stderr)
+            # We pass the function itself so we can inspect its @tool capabilities later
+            return run_podman_tool(name, cmd, arg_payload, f._required_caps if hasattr(f, '_required_caps') else set())
+        return wrapper
+    return decorator
+
+def run_podman_tool(name: str, base_cmd: List[str], args: str, caps: set) -> Dict[str, Any]:
+    """Executes a command inside a Podman container."""
+    # Determine if we can write to the mounted directory or just read it
+    mount_mode = "rw" if "write" in caps else "ro"
+    
+    full_subcommand_str = f"{' '.join(base_cmd)} {args}"
+
+    podman_cmd = [
+        "podman", "run", "--rm",
+        "--net", "none", # No internet!
+        "-v", f"{SANDBOX_CONFIG['host_data_dir']}:/workspace:{mount_mode}",
+        SANDBOX_CONFIG["image"],
+        "/bin/bash", "-c", 
+        f"cd /workspace && {full_subcommand_str}"
+    ]
+
+    try:
+        output = subprocess.check_output(
+            podman_cmd, stderr=subprocess.STDOUT, text=True
         )
         return {name: output.strip()}
     except subprocess.CalledProcessError as exc:
-        # Return detailed error for LLM debugging (exit code + stderr/stdout content)
-        error_msg = f"Command Error (Exit Code {exc.returncode}):\n{exc.output}"
-        return {name: error_msg}
+        return {name: f"Container Error:\n{exc.output}"}
     except Exception as exc: 
-        # Catch-all for system errors like 'file not found' or permission issues
-        return {name: f"System Error: {str(exc)}"}
+        return {name: f"Sandbox System Error: {str(exc)}"}
 
 def discover_tools(namespace: Dict[str, Any], module_name: str) -> List[str]:
     """Scans namespace for tools belonging to the current module."""

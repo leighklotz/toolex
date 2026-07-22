@@ -258,7 +258,6 @@ def main(args):
                 })
                 
                 try:
-                    ## TODO: Add `"model": MODEL`
                     _ui_status("✨")
                     final_resp = requests.post(URL, json={"model": MODEL, "messages": messages}).json()
                     if "choices" in final_resp and len(final_resp["choices"]) > 0:
