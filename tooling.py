@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import subprocess
@@ -8,11 +9,22 @@ import shlex
 from typing import Dict, List, Optional, Any, Union, Callable
 from functools import wraps
 
+
+
 # --- SANDBOX CONFIGURATION ---
+# TODO: move elsewhere
 SANDBOX_CONFIG = {
     "image": "toolex-sandbox",          # The image you built with Podman
-    "host_data_dir": "/home/klotz/wip", # What the LLM sees as /workspace
+    "host_data_dir": "/home/klotz/wip/toolex", # What the LLM sees as /workspace
 }
+
+# Logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 def tool(capabilities: Union[str, List[str], Callable] = None):
     """
@@ -107,6 +119,7 @@ def run_podman_tool(name: str, base_cmd: List[str], args: str, caps: set) -> Dic
         "/bin/bash", "-c", 
         f"cd /workspace && {full_subcommand_str}"
     ]
+    logger.info(podman_cmd)
 
     try:
         output = subprocess.check_output(

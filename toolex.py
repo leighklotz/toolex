@@ -20,7 +20,6 @@ import argparse
 #TOTAL_ITERATIONS = 10
 TOTAL_ITERATIONS = 30
 
-
 # Logging
 logging.basicConfig(
     level=logging.INFO,
