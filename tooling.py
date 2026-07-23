@@ -59,13 +59,19 @@ def tool(capabilities: Union[str, List[str], Callable] = None):
 
 # --- HOST EXECUTION ---
 def bash_wrap(name: str, cmd: List[str]):
-    """Runs the command directly on host machine.
-    Wraps in a standard command-execution pattern for logging."""
+    """Runs the command directly on host machine."""
     def decorator(f: Callable) -> Callable:
         @wraps(f)
         def wrapper(*args, **kwargs) -> Dict[str, Any]:
             cmd_label = " ".join(cmd)
-            arg_payload = str(args[0]) if args and not isinstance(args[0], (dict, list)) else ""
+            payload = None
+            if args and not isinstance(args[0], (dict, list)):
+                payload = args[0]
+            elif "args" in kwargs:
+                payload = kwargs["args"]
+            
+            arg_payload = str(payload).strip() if payload is not None else ""
+            
             print(f"🚀{' '.join(cmd)} {arg_payload}", file=sys.stderr)
             return run_bash_tool(name, cmd, arg_payload)
         return wrapper
@@ -97,9 +103,17 @@ def sandbox_wrap(name: str, cmd: List[str]):
         @wraps(f)
         def wrapper(*args, **kwargs) -> Dict[str, Any]:
             cmd_label = " ".join(cmd)
-            arg_payload = str(args[0]) if args and not isinstance(args[0], (dict, list)) else ""
+            
+            # FIX: Check positional args OR keyword 'args'
+            payload = None
+            if args and not isinstance(args[0], (dict, list)):
+                payload = args[0]
+            elif "args" in kwargs:
+                payload = kwargs["args"]
+
+            arg_payload = str(payload).strip() if payload is not None else ""
+
             print(f"🛡️ [SANDBOX] {name} | Executing: {' '.join(cmd)} {arg_payload}", file=sys.stderr)
-            # We pass the function itself so we can inspect its @tool capabilities later
             return run_podman_tool(name, cmd, arg_payload, f._required_caps if hasattr(f, '_required_caps') else set())
         return wrapper
     return decorator
