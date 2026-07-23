@@ -148,8 +148,8 @@ def find_module_for_func(mod_registry: Dict[str, Any], func_name: str):
 
 def parse_permissions(args_list):
     """
-    Converts ['foo', 'git:read'] into:
-    { 'foo_tools': {'all'}, 'git_tools': {'read'} }
+    Converts ['foo', 'git:all'] into:
+    { 'foo_tools': {'read'}, 'git_tools': {'all'} }
     Errors if tool or permission does not exist.
     """
     mapping = {}
