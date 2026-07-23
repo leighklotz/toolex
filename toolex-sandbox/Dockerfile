@@ -5,7 +5,9 @@ g
 FROM debian:bookworm-slim
 
 # Install only the essentials required by your tools
-RUN apt-get update && apt-get install -y \
+# Disable APT sandboxing via configuration flag during installation
+RUN apt-get -o APT::Sandbox::User=root update && \
+    apt-get -o APT::Sandbox::User=root install -y \
     bash \
     git \
     procps \
