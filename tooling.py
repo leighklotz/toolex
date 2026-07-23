@@ -11,7 +11,7 @@ from functools import wraps
 # --- SANDBOX CONFIGURATION ---
 SANDBOX_CONFIG = {
     "image": "llm-sandbox",        # The image you built with Podman
-    "host_data_dir": "/absolute/path/to/your/data", # What the LLM sees as /workspace
+    "host_data_dir": "/home/klotz/wip", # What the LLM sees as /workspace
 }
 
 def tool(capabilities: Union[str, List[str], Callable] = None):
@@ -72,7 +72,11 @@ def run_bash_tool(name: str, cmd: List[str], args: Optional[str] = "") -> Dict[s
         )
         return {name: output.strip()}
     except Exception as exc: # Simplified for brevity
-        return {name: f"Error: {str(exc)}"}
+        if True:
+            raise
+        else:
+            print(f"🚀{' '.join(cmd)} {arg_payload} {str(exc)}", file=sys.stderr)
+            return {name: f"Error: {str(exc)}"}
 
 # --- PODMAN SANDBOX ---
 def sandbox_wrap(name: str, cmd: List[str]):
