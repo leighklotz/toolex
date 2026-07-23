@@ -10,7 +10,7 @@ from functools import wraps
 
 # --- SANDBOX CONFIGURATION ---
 SANDBOX_CONFIG = {
-    "image": "llm-sandbox",        # The image you built with Podman
+    "image": "toolex-sandbox",          # The image you built with Podman
     "host_data_dir": "/home/klotz/wip", # What the LLM sees as /workspace
 }
 

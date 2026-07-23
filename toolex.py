@@ -231,7 +231,7 @@ def main(args):
             _ui_status("✨")
             logger.debug(f"requests.post {URL=}")
             response = requests.post(URL, json=j).json()
-            logger.debug(f"requests.response {response=}")
+            logger.debug(f"request={j} response={response}")
             if "choices" not in response or len(response["choices"]) == 0:
                 logger.error(f"Unexpected response format: {response}")
                 break
