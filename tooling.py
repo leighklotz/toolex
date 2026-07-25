@@ -110,7 +110,7 @@ def sandbox_wrap(name: str, cmd: List[str]):
 
             arg_payload = str(payload).strip() if payload is not None else ""
 
-            print(f"{SANDBOX_EMOJI}️[SANDBOX {name}]: {' '.join(cmd)}{arg_payload}", file=sys.stderr)
+            print(f"{SANDBOX_EMOJI} [SANDBOX {name}]: {' '.join(cmd)} {arg_payload}".rstrip(), file=sys.stderr)
             return run_podman_tool(name, cmd, arg_payload, f._required_caps if hasattr(f, '_required_caps') else set())
         return wrapper
     return decorator
