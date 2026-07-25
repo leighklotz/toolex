@@ -110,6 +110,23 @@ echo no changes
 ```
 ````
 
+#### Run the client with multiple tools
+```bash
+./toolex.py --tools git weather "What is the ratio of git commits to current temperature in Paris?"
+```
+
+The client will:
+1. Discover all functions decorated with `@tool`.
+2. Build the OpenAI tool schema and send the prompt.
+3. When the model decides to call a tool, the script will invoke it locally... (etc)
+
+## Command Line Arguments
+
+| Argument | Description | Default |
+| :--- | :--- | :--- |
+| `--tools <module[:perm]...` | List of tools and permissions available to the LLM. | None |
+| `--workspace-dir <path>` | Sets the working directory for podbash tools | Current dir / `$TOOLEX_WORKSPACE_DIR` |
+
 ## Extending the system
 
 * **Add a new module** – put a `.py` file with one or more `@tool` functions.
