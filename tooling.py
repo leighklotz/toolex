@@ -81,17 +81,10 @@ def run_bash_tool(name: str, cmd: List[str], args: Optional[str] = "") -> Dict[s
     if args_str:
         full_cmd += shlex.split(args_str)
         
-    try:
-        output = subprocess.check_output(
-            full_cmd, cwd=os.getcwd(), stderr=subprocess.STDOUT, text=True,                
-        )
-        return {name: output.strip()}
-    except Exception as exc: # Simplified for brevity
-        if True:
-            raise
-        else:
-            print(f"🚀{' '.join(cmd)} {arg_payload} {str(exc)}", file=sys.stderr)
-            return {name: f"Error: {str(exc)}"}
+    output = subprocess.check_output(
+        full_cmd, cwd=os.getcwd(), stderr=subprocess.STDOUT, text=True,
+    )
+    return {name: output.strip()}
 
 # --- PODMAN SANDBOX ---
 def sandbox_wrap(name: str, cmd: List[str]):
