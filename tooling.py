@@ -12,6 +12,8 @@ from functools import wraps
 
 
 # --- SANDBOX CONFIGURATION ---
+SANDBOX_EMOJI = "\U0001F3D6" # 🏖️
+
 # TODO: move elsewhere
 SANDBOX_CONFIG = {
     "image": "toolex-sandbox",          # The image you built with Podman
@@ -113,7 +115,7 @@ def sandbox_wrap(name: str, cmd: List[str]):
 
             arg_payload = str(payload).strip() if payload is not None else ""
 
-            print(f"🛡️ [SANDBOX] {name} | Executing: {' '.join(cmd)} {arg_payload}", file=sys.stderr)
+            print(f"{SANDBOX_EMOJI}️[SANDBOX {name}]: {' '.join(cmd)}{arg_payload}", file=sys.stderr)
             return run_podman_tool(name, cmd, arg_payload, f._required_caps if hasattr(f, '_required_caps') else set())
         return wrapper
     return decorator
@@ -133,7 +135,7 @@ def run_podman_tool(name: str, base_cmd: List[str], args: str, caps: set) -> Dic
         "/bin/bash", "-c", 
         f"cd /workspace && {full_subcommand_str}"
     ]
-    logger.info(podman_cmd)
+    # logger.info(f"{podman_cmd=}")
 
     try:
         output = subprocess.check_output(

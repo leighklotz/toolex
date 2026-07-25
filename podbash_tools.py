@@ -6,6 +6,14 @@ from typing import Dict, List, Optional
 from tooling import tool, run_podman_tool, sandbox_wrap, discover_tools
 
 
+# ----------------------------------------------------------------------
+# Executable bash tool! Careful!
+# ----------------------------------------------------------------------
+@tool("eval")
+@sandbox_wrap("bash", ["bash"])
+def eval_bash(args: Optional[str] = "") -> Dict[str, str]:
+    """Execute bash with specified args. Careful!"""
+    pass
 
 # ----------------------------------------------------------------------
 # Public tools
