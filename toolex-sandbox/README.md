@@ -5,7 +5,7 @@
    podman build -t toolex-sandbox .
    ```
 
-1.  **Automatic Permission Escalation:** You don't have to manually manage permissions for every tool. Because you used `@tool("write")` in your `git_tools.py`, the logic inside `run_sandboxed_tool` automatically detects it and mounts the directory with `:rw` instead of `:ro`.
+1.  **Automatic Permission Escalation:** You don't have to manually manage permissions for every tool. Because you used `@tool("write")` in your `git_tools.py`, the logic inside `run_podman_tool` automatically detects it and mounts the directory with `:rw` instead of `:ro`.
 2.  **The "Chroot" Effect:** Even though the LLM is running a command like `ls -R /`, because we ran it in Podman, they are seeing `/workspace` (which is your data dir). If they try to run `ls /etc/shadow`, they will get a "Permission Denied" or find an empty folder, because their container has its own tiny filesystem.
 3.  **Zero Residue:** Because of the `--rm` flag in Podman, every single command creates a brand new environment and destroys it immediately after completion. An `alias` created by an LLM in one turn will not exist when they run their next tool call.
 
