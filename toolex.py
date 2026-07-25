@@ -20,7 +20,6 @@ import argparse
 #TOTAL_ITERATIONS = 10
 TOTAL_ITERATIONS = 30
 
-
 # Logging
 logging.basicConfig(
     level=logging.INFO,
@@ -149,8 +148,8 @@ def find_module_for_func(mod_registry: Dict[str, Any], func_name: str):
 
 def parse_permissions(args_list):
     """
-    Converts ['foo', 'git:read'] into:
-    { 'foo_tools': {'all'}, 'git_tools': {'read'} }
+    Converts ['foo', 'git:all'] into:
+    { 'foo_tools': {'read'}, 'git_tools': {'all'} }
     Errors if tool or permission does not exist.
     """
     mapping = {}
@@ -187,6 +186,10 @@ def main(args):
         logger.setLevel(numeric_level)
     else:
         raise ValueError(f"Invalid log level: {args.log_level}")
+
+    # Set workspace directory for sandbox tools before any tool modules are loaded
+    if args.workspace_dir:
+        os.environ["TOOLEX_WORKSPACE_DIR"] = args.workspace_dir
 
     # Determine initial messages from stdin
     messages = []
@@ -231,7 +234,7 @@ def main(args):
             _ui_status("✨")
             logger.debug(f"requests.post {URL=}")
             response = requests.post(URL, json=j).json()
-            logger.debug(f"requests.response {response=}")
+            logger.debug(f"request={j} response={response}")
             if "choices" not in response or len(response["choices"]) == 0:
                 logger.error(f"Unexpected response format: {response}")
                 break
@@ -360,6 +363,12 @@ if __name__ == "__main__":
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         default="INFO",
         help="Set the logging level (default: INFO)",
+    )
+    parser.add_argument(
+        "--workspace-dir",
+        type=str,
+        default=None,
+        help="Workspace directory to mount into the sandbox when using podbash tools (default: TOOLEX_WORKSPACE_DIR env var or current directory)",
     )
     parser.add_argument(
         "--drop-reasoning",

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import subprocess
@@ -8,11 +9,19 @@ import shlex
 from typing import Dict, List, Optional, Any, Union, Callable
 from functools import wraps
 
+
+
 # --- SANDBOX CONFIGURATION ---
+SANDBOX_EMOJI = "\U0001F3D6" # 🏖️
+
+# TODO: move elsewhere
 SANDBOX_CONFIG = {
-    "image": "llm-sandbox",        # The image you built with Podman
-    "host_data_dir": "/absolute/path/to/your/data", # What the LLM sees as /workspace
+    "image": "toolex-sandbox",          # The image you built with Podman
+    "host_data_dir": os.environ.get("TOOLEX_WORKSPACE_DIR", os.getcwd()), # What the LLM sees as /workspace
 }
+
+# Logging
+logger = logging.getLogger(__name__)
 
 def tool(capabilities: Union[str, List[str], Callable] = None):
     """
@@ -47,13 +56,19 @@ def tool(capabilities: Union[str, List[str], Callable] = None):
 
 # --- HOST EXECUTION ---
 def bash_wrap(name: str, cmd: List[str]):
-    """Runs the command directly on host machine.
-    Wraps in a standard command-execution pattern for logging."""
+    """Runs the command directly on host machine."""
     def decorator(f: Callable) -> Callable:
         @wraps(f)
         def wrapper(*args, **kwargs) -> Dict[str, Any]:
             cmd_label = " ".join(cmd)
-            arg_payload = str(args[0]) if args and not isinstance(args[0], (dict, list)) else ""
+            payload = None
+            if args and not isinstance(args[0], (dict, list)):
+                payload = args[0]
+            elif "args" in kwargs:
+                payload = kwargs["args"]
+            
+            arg_payload = str(payload).strip() if payload is not None else ""
+            
             print(f"🚀{' '.join(cmd)} {arg_payload}", file=sys.stderr)
             return run_bash_tool(name, cmd, arg_payload)
         return wrapper
@@ -66,13 +81,10 @@ def run_bash_tool(name: str, cmd: List[str], args: Optional[str] = "") -> Dict[s
     if args_str:
         full_cmd += shlex.split(args_str)
         
-    try:
-        output = subprocess.check_output(
-            full_cmd, cwd=os.getcwd(), stderr=subprocess.STDOUT, text=True,                
-        )
-        return {name: output.strip()}
-    except Exception as exc: # Simplified for brevity
-        return {name: f"Error: {str(exc)}"}
+    output = subprocess.check_output(
+        full_cmd, cwd=os.getcwd(), stderr=subprocess.STDOUT, text=True,
+    )
+    return {name: output.strip()}
 
 # --- PODMAN SANDBOX ---
 def sandbox_wrap(name: str, cmd: List[str]):
@@ -81,9 +93,17 @@ def sandbox_wrap(name: str, cmd: List[str]):
         @wraps(f)
         def wrapper(*args, **kwargs) -> Dict[str, Any]:
             cmd_label = " ".join(cmd)
-            arg_payload = str(args[0]) if args and not isinstance(args[0], (dict, list)) else ""
-            print(f"🛡️ [SANDBOX] {name} | Executing: {' '.join(cmd)} {arg_payload}", file=sys.stderr)
-            # We pass the function itself so we can inspect its @tool capabilities later
+            
+            # FIX: Check positional args OR keyword 'args'
+            payload = None
+            if args and not isinstance(args[0], (dict, list)):
+                payload = args[0]
+            elif "args" in kwargs:
+                payload = kwargs["args"]
+
+            arg_payload = str(payload).strip() if payload is not None else ""
+
+            print(f"{SANDBOX_EMOJI} [SANDBOX {name}]: {' '.join(cmd)} {arg_payload}".rstrip(), file=sys.stderr)
             return run_podman_tool(name, cmd, arg_payload, f._required_caps if hasattr(f, '_required_caps') else set())
         return wrapper
     return decorator
@@ -93,16 +113,17 @@ def run_podman_tool(name: str, base_cmd: List[str], args: str, caps: set) -> Dic
     # Determine if we can write to the mounted directory or just read it
     mount_mode = "rw" if "write" in caps else "ro"
     
-    full_subcommand_str = f"{' '.join(base_cmd)} {args}"
+    args_list = shlex.split(args) if args.strip() else []
+    tool_argv = list(base_cmd) + args_list
 
     podman_cmd = [
         "podman", "run", "--rm",
         "--net", "none", # No internet!
+        "--workdir", "/workspace",
         "-v", f"{SANDBOX_CONFIG['host_data_dir']}:/workspace:{mount_mode}",
         SANDBOX_CONFIG["image"],
-        "/bin/bash", "-c", 
-        f"cd /workspace && {full_subcommand_str}"
-    ]
+    ] + tool_argv
+    # logger.info(f"{podman_cmd=}")
 
     try:
         output = subprocess.check_output(
