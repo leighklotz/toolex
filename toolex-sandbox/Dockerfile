@@ -1,7 +1,6 @@
 # Use a slim base for speed and security
 # *Build this once:*
 #   podman build -t toolex-sandbox .
-g
 FROM debian:bookworm-slim
 
 # Install only the essentials required by your tools
