@@ -10,8 +10,11 @@
 3.  **Zero Residue:** Because of the `--rm` flag in Podman, every single command creates a brand new environment and destroys it immediately after completion. An `alias` created by an LLM in one turn will not exist when they run their next tool call.
 
 ### How to test it:
-1.  **Create your data folder:** `mkdir /home/klotz/wip/test_data && touch /home/klotz/wip/test_data/hello.txt`
-2.  **Update the path in `tooling.py`**: Set `HOST_DATA_DIR = "/home/klotz/wip/test_data"`.
+1.  **Create your data folder:** `mkdir /tmp/test_data && touch /tmp/test_data/hello.txt`
+2.  **Set the workspace directory** via the `TOOLEX_WORKSPACE_DIR` environment variable or the `--workspace-dir` flag when invoking `toolex.py`:
+    - `TOOLEX_WORKSPACE_DIR=/tmp/test_data toolex.py --tools podbash`
+    - or: `toolex.py --tools podbash --workspace-dir /tmp/test_data`
+    - If neither is set, the current working directory is used as the default.
 3.  **Run your script.** 
 
 When you call `get_ls(args=".")`, Podman will spin up, mount that folder as read-only, show the file list, and vanish. If an LLM tries to run `@tool("write")` via `do_rm("-rf /")`, it will attempt to delete files inside a temporary container which is destroyed milliseconds later—your host stays safe.
