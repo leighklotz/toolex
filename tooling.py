@@ -120,16 +120,16 @@ def run_podman_tool(name: str, base_cmd: List[str], args: str, caps: set) -> Dic
     # Determine if we can write to the mounted directory or just read it
     mount_mode = "rw" if "write" in caps else "ro"
     
-    full_subcommand_str = f"{' '.join(base_cmd)} {args}"
+    args_list = shlex.split(args) if args.strip() else []
+    tool_argv = list(base_cmd) + args_list
 
     podman_cmd = [
         "podman", "run", "--rm",
         "--net", "none", # No internet!
+        "--workdir", "/workspace",
         "-v", f"{SANDBOX_CONFIG['host_data_dir']}:/workspace:{mount_mode}",
         SANDBOX_CONFIG["image"],
-        "/bin/bash", "-c", 
-        f"cd /workspace && {full_subcommand_str}"
-    ]
+    ] + tool_argv
     # logger.info(f"{podman_cmd=}")
 
     try:
