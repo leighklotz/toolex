@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 
-import sys
-import subprocess
-from typing import Dict, List, Optional
-from tooling import tool, run_podman_tool, sandbox_wrap, discover_tools
+from typing import Dict, Optional
+from tooling import tool, sandbox_wrap, discover_tools
 
 
 # ----------------------------------------------------------------------
