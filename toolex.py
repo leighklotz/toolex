@@ -187,6 +187,10 @@ def main(args):
     else:
         raise ValueError(f"Invalid log level: {args.log_level}")
 
+    # Set workspace directory for sandbox tools before any tool modules are loaded
+    if args.workspace_dir:
+        os.environ["TOOLEX_WORKSPACE_DIR"] = args.workspace_dir
+
     # Determine initial messages from stdin
     messages = []
     header_line = sys.stdin.readline().strip()
@@ -359,6 +363,12 @@ if __name__ == "__main__":
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         default="INFO",
         help="Set the logging level (default: INFO)",
+    )
+    parser.add_argument(
+        "--workspace-dir",
+        type=str,
+        default=None,
+        help="Workspace directory to mount into the sandbox when using podbash tools (default: TOOLEX_WORKSPACE_DIR env var or current directory)",
     )
     parser.add_argument(
         "--drop-reasoning",

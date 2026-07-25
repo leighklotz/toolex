@@ -17,7 +17,7 @@ SANDBOX_EMOJI = "\U0001F3D6" # 🏖️
 # TODO: move elsewhere
 SANDBOX_CONFIG = {
     "image": "toolex-sandbox",          # The image you built with Podman
-    "host_data_dir": "/home/klotz/wip/toolex", # What the LLM sees as /workspace
+    "host_data_dir": os.environ.get("TOOLEX_WORKSPACE_DIR", os.getcwd()), # What the LLM sees as /workspace
 }
 
 # Logging
