@@ -29,7 +29,7 @@ def tool(capabilities: Union[str, List[str], Callable] = None):
     Handles various calling styles for flexibility:
         @tool                 -> No capabilities (defaults to empty set)
         @tool("write")         -> Single capability string
-        @tool(["read", "exec"]) -> Multiple capabilities list/tuple
+        @tool(["read", "exec"]) -> Multiple capability list/tuple
         @tool()                -> Explicitly no capabilities
     """
     # Case 1: User used @tool (no parentheses). 'capabilities' is the function being decorated.
@@ -75,16 +75,25 @@ def bash_wrap(name: str, cmd: List[str]):
     return decorator
 
 def run_bash_tool(name: str, cmd: List[str], args: Optional[str] = "") -> Dict[str, Any]:
-    """Runs the command directly on host machine."""
-    args_str = (args or "").strip()
-    full_cmd = list(cmd)
-    if args_str:
-        full_cmd += shlex.split(args_str)
-        
-    output = subprocess.check_output(
-        full_cmd, cwd=os.getcwd(), stderr=subprocess.STDOUT, text=True,
-    )
-    return {name: output.strip()}
+    """Runs the command directly on host machine. Returns stderr on failure."""
+    args_list = shlex.split(args) if args.strip() else []
+    full_cmd = list(cmd) + args_list
+
+    try:
+        result = subprocess.run(
+            full_cmd, 
+            cwd=os.getcwd(), 
+            capture_output=True, 
+            text=True,
+            check=True
+        )
+        return {name: result.stdout.strip()}
+    except subprocess.CalledProcessError as exc:
+        # CRITICAL FIX: Return the actual error from Git so the LLM knows WHY it failed.
+        error_report = f"Command '{' '.join(full_cmd)}' exited with status {exc.returncode}.\nSTDERR: {exc.stderr.strip()}"
+        return {name: error_report}
+    except Exception as exc: 
+        return {name: f"System Error: {str(exc)}"}
 
 # --- PODMAN SANDBOX ---
 def sandbox_wrap(name: str, cmd: List[str]):
@@ -92,9 +101,6 @@ def sandbox_wrap(name: str, cmd: List[str]):
     def decorator(f: Callable) -> Callable:
         @wraps(f)
         def wrapper(*args, **kwargs) -> Dict[str, Any]:
-            cmd_label = " ".join(cmd)
-            
-            # FIX: Check positional args OR keyword 'args'
             payload = None
             if args and not isinstance(args[0], (dict, list)):
                 payload = args[0]
@@ -110,9 +116,7 @@ def sandbox_wrap(name: str, cmd: List[str]):
 
 def run_podman_tool(name: str, base_cmd: List[str], args: str, caps: set) -> Dict[str, Any]:
     """Executes a command inside a Podman container."""
-    # Determine if we can write to the mounted directory or just read it
     mount_mode = "rw" if "write" in caps else "ro"
-    
     args_list = shlex.split(args) if args.strip() else []
     tool_argv = list(base_cmd) + args_list
 
@@ -123,15 +127,13 @@ def run_podman_tool(name: str, base_cmd: List[str], args: str, caps: set) -> Dic
         "-v", f"{SANDBOX_CONFIG['host_data_dir']}:/workspace:{mount_mode}",
         SANDBOX_CONFIG["image"],
     ] + tool_argv
-    # logger.info(f"{podman_cmd=}")
 
     try:
-        output = subprocess.check_output(
-            podman_cmd, stderr=subprocess.STDOUT, text=True
-        )
-        return {name: output.strip()}
-    except subprocess.CalledProcessError as exc:
-        return {name: f"Container Error:\n{exc.output}"}
+        result = subprocess.run(podman_cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            return {name: result.stdout.strip()}
+        else:
+            return {name: f"Container Error (Exit {result.returncode}):\n{result.stderr.strip()}"}
     except Exception as exc: 
         return {name: f"Sandbox System Error: {str(exc)}"}
 
