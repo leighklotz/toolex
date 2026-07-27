@@ -69,7 +69,7 @@ def bash_wrap(name: str, cmd: List[str]):
             
             arg_payload = str(payload).strip() if payload is not None else ""
             
-            print(f"🚀{' '.join(cmd)} {arg_payload}", file=sys.stderr)
+            print(f"🚀{' '.join(cmd)} {arg_payload}", file=sys.stderr, end='')
             return run_bash_tool(name, cmd, arg_payload)
         return wrapper
     return decorator
