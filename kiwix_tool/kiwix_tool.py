@@ -5,7 +5,8 @@ from markdownify import markdownify as md
 from tooling import tool
 
 # Fallback to an environment variable so you don't hardcode paths
-ZIM_PATH = os.environ.get("KIWIX_ZIM_PATH", "wikipedia_en_all.zim")
+ZIM_FILE = "wikipedia_en_all_mini_2026-06.zim"
+ZIM_PATH = os.environ.get("KIWIX_ZIM_PATH", ZIM_FILE)
 
 # Global cache for the Archive handle to optimize repeated LLM tool calls
 _ARCHIVE_CACHE = None
@@ -61,4 +62,5 @@ def read_wikipedia_article(internal_path: str) -> str:
         return cleaned_markdown
     except Exception as e:
         return f"Error reading article path '{internal_path}': {str(e)}"
+
 
