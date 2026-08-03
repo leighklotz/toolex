@@ -25,7 +25,7 @@ def _get_archive():
 
 # --- TOOLS ---
 
-@tool
+@tool("read")
 def search_wikipedia_titles(query: str) -> str:
     """
     Search offline Wikipedia article titles using a keyword query.
@@ -43,7 +43,7 @@ def search_wikipedia_titles(query: str) -> str:
     except Exception as e:
         return f"Error executing search: {str(e)}"
 
-@tool
+@tool("read")
 def full_text_search(query: str) -> str:
     """
     Performs a deep, native full-text search inside the ZIM file content. 
@@ -70,7 +70,7 @@ def full_text_search(query: str) -> str:
     except Exception as e:
         return f"Error during full-text search: {str(e)}"
 
-@tool
+@tool("read")
 def read_wikipedia_article(internal_path: str) -> str:
     """
     Extract and read the full Wikipedia article formatted in Markdown 
@@ -98,7 +98,7 @@ def read_wikipedia_article(internal_path: str) -> str:
     except Exception as e:
         return f"Error reading article path '{internal_path}': {str(e)}"
 
-@tool
+@tool("read")
 def search_and_summarize_topics(query: str) -> str:
     """
     An advanced tool that searches for a topic across the entire archive 
