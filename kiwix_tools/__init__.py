@@ -1,5 +1,3 @@
-from . import kiwix_tool
-from . import file2
+from . import core as kiwix_tools
 
-__all__ = ["kiwix_tool"]
-
+__all__ = ["kiwix_tools"]
