@@ -2,9 +2,14 @@ import os
 import subprocess
 from pathlib import Path
 from libzim.reader import Archive
-from libzim.search import Query, Searcher  # Added to support native search
+from libzim.search import Query, Searcher
 from markdownify import markdownify as md
-from tooling import tool
+from tooling import tool, discover_tools
+
+### Much copied from
+### <https://github.com/mozanunal/llm-tools-kiwix/>
+### Apache 2.0 License
+
 
 # --- CONFIGURATION & CACHE ---
 
@@ -129,3 +134,5 @@ def search_and_summarize_topics(query: str) -> str:
         return "\n".join(output_parts).strip()
     except Exception as e:
         return f"Error in search and summarize tool: {str(e)}"
+
+__all__ = discover_tools(globals(), __name__)

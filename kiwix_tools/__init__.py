@@ -1,3 +1,4 @@
-from . import core as kiwix_tools
+from .core import *
+from tooling import discover_tools
 
-__all__ = ["kiwix_tools"]
+__all__ = discover_tools(globals(), __name__)
