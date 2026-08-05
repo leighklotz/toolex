@@ -83,4 +83,6 @@ def search_files(
                 print(f"Error reading file {filepath}: {e}", file=sys.stderr)
     return "\n".join(results)
 
+
+### File must end with this line
 __all__ = discover_tools(globals(), __name__)
