@@ -70,4 +70,5 @@ def do_rm(args: Optional[str] = "") -> Dict[str, str]:
     """Remove files or directories. Args: target paths and flags (e.g., '-rf')."""
     raise Exception("rm is not implemented")
 
+### File must end with this line
 __all__ = discover_tools(globals(), __name__)

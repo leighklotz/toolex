@@ -74,4 +74,6 @@ def do_git_checkout(args: Optional[str] = "") -> Dict[str, str]:
     """`git checkout`: switches branches or restores files."""
     pass
 
+
+### File must end with this line
 __all__ = discover_tools(globals(), __name__)

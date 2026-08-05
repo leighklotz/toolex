@@ -20,4 +20,6 @@ def get_location() -> Dict[str, str]:
     return { "location": "paris" }
 
 
+### File must end with this line
 __all__ = discover_tools(globals(), __name__)
+
