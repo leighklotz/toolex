@@ -376,4 +376,9 @@ if __name__ == "__main__":
         help="Drop reasoning_content from tool call history, preventing the model from seeing its own thoughts in subsequent turns.",
     )
     args = parser.parse_args()
-    main(args)
+    try:
+        main(args)
+    except KeyboardInterrupt:
+        print("\n[!] Interrupted by user. Exiting")
+        sys.exit(1)
+
