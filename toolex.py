@@ -17,9 +17,6 @@ import sys
 from typing import get_origin, get_args, Union, Any, Dict, List, Annotated, get_type_hints
 import argparse
 
-#TOTAL_ITERATIONS = 10
-TOTAL_ITERATIONS = 30
-
 # Logging
 logging.basicConfig(
     level=logging.INFO,
@@ -33,6 +30,7 @@ VIA_API_CHAT_BASE = os.getenv("VIA_API_CHAT_BASE", "http://127.0.0.1:5000")
 MODEL = os.getenv("MODEL", 'gemma-4-26b-qat-batch')
 URL = f"{VIA_API_CHAT_BASE}/v1/chat/completions"
 MAGIC_HEADER = "Content-Type: application/x-llm-history+json"
+FAIL_ON_TOOL_ERROR = True
 
 def generate_openai_schema(obj):
     """Generates an OpenAI tool schema using Strategic Docstrings and Annotated metadata."""
@@ -218,7 +216,7 @@ def main(args):
 
     TOOLS = build_tools_from_modules(MODS_LIST, permission_map)
     executed_states = set()
-    for i in range(TOTAL_ITERATIONS):
+    for i in range(args.total_iterations):
         # If assistant is done thinking and has no tool calls, it's a final response
         if (
             messages
@@ -315,14 +313,17 @@ def main(args):
                     # Execute with filtered arguments
                     result = execute_tool(mod_obj, name, **filtered_args)
                 except Exception as e:
-                    logger.error(f"Tool execution error: {e}")
-                    # Append error to messages so LLM knows why it failed instead of crashing
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": call["id"],
-                        "content": json.dumps({"error": str(e)}),
-                    })
-                    continue
+                    if FAIL_ON_TOOL_ERROR:
+                        raise e
+                    else:
+                        logger.error(f"Reporting tool execution error: {e}")
+                        # Append error to messages so LLM knows why it failed instead of crashing
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": call["id"],
+                            "content": json.dumps({"error": str(e)}),
+                        })
+                        continue
 
                 if not isinstance(result, (dict, list, str, int, float, bool)):
                     result = {"result": str(result)}
@@ -374,6 +375,12 @@ if __name__ == "__main__":
         "--drop-reasoning",
         action="store_true",
         help="Drop reasoning_content from tool call history, preventing the model from seeing its own thoughts in subsequent turns.",
+    )
+    parser.add_argument(
+        "--total-iterations",
+        type=int,
+        help="Maximum tool iterations, total. Default 30",
+        default=30
     )
     args = parser.parse_args()
     try:
