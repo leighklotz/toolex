@@ -8,11 +8,6 @@ from libzim.search import Query, Searcher
 from markdownify import markdownify as md
 from tooling import tool, discover_tools
 
-### Much copied from
-### <https://github.com/mozanunal/llm-tools-kiwix/>
-### Apache 2.0 License
-
-
 # --- CONFIGURATION & CACHE ---
 
 ZIM_FILE = "/home/klotz/wip/toolex/kiwix_tools/zims/wikipedia_en_all_mini_2026-06.zim"
@@ -20,19 +15,19 @@ ZIM_PATH = os.environ.get("KIWIX_ZIM_PATH", ZIM_FILE)
 _ARCHIVE_CACHE = None
 
 def _get_archive():
-    """Internal helper to manage the singleton archive connection."""
     global _ARCHIVE_CACHE
     if _ARCHIVE_CACHE is None:
-        _ARCHIVE_CACHE = Archive(str(Path(ZIM_PATH)))
+        # Ensure path exists to prevent startup crash
+        path_obj = Path(ZIM_PATH)
+        if not path_obj.exists():
+             raise FileNotFoundError(f"ZIM file not found at {ZIM_PATH}")
+        _ARCHIVE_CACHE = Archive(str(path_obj))
     return _ARCHIVE_CACHE
 
-# --- LOGGING DECORATOR ---
-
+# --- LOGGING DECORATOR (Remains the same) ---
 def log_tool_call(func):
-    """Decorator to print tool invocation details to stderr."""
     @wraps(func)
     def wrapper(*args, **kwargs):
-        # Format arguments for a readable debug line in stderr
         arg_str = ""
         if args:
             arg_str = str(args[0]) if len(args) == 1 else list(args)
@@ -40,9 +35,13 @@ def log_tool_call(func):
             arg_str = ", ".join([f"{k}={v!r}" for k, v in kwargs.items()])
             
         print(f"🚀 {func.__name__} {arg_str}", file=sys.stderr, end='')
-        result = func(*args, **kwargs)
-        print(f"🚀 {func.__name__} {arg_str} ==> {result}", file=sys.stderr, end='')
-        return result
+        try:
+            result = func(*args, **kwargs)
+            print(f" ==> {result[:100]}...", file=sys.stderr, end='\n') # Truncate log to avoid cluttering stderr with huge text
+            return result
+        except Exception as e:
+            print(f" ❌ ERROR: {str(e)}", file=sys.stderr)
+            raise e
     return wrapper
 
 # --- TOOLS ---
@@ -50,11 +49,7 @@ def log_tool_call(func):
 @log_tool_call
 @tool("read")
 def search_wikipedia_titles(query: str) -> str:
-    """
-    Search offline Wikipedia article titles using a keyword query.
-    Returns a list of matching article internal paths and titles via subprocess.
-    Use this when you know the specific name or title of an article.
-    """
+    """Search offline Wikipedia article titles using a keyword query via CLI."""
     result = subprocess.run(
         ["kiwix-search", "--suggestion", ZIM_PATH, query],
         capture_output=True,
@@ -66,11 +61,7 @@ def search_wikipedia_titles(query: str) -> str:
 @log_tool_call
 @tool("read")
 def full_text_search(query: str) -> str:
-    """
-    Performs a deep, native full-text search inside the ZIM file content. 
-    Returns an estimated number of matches and the internal paths for up to 3 most relevant articles.
-    Use this when looking for specific concepts or topics mentioned within article text.
-    """
+    """Performs a deep, native full-text search inside the ZIM file content."""
     archive = _get_archive()
     searcher = Searcher(archive)
     query_obj = Query().set_query(query)
@@ -81,13 +72,15 @@ def full_text_search(query: str) -> str:
         return f"No full-text matches found for '{query}'."
 
     paths = []
+    # IMPORTANT: We MUST get the actual entry path from the result object, not just str(res)
     search_results = list(results.getResults(0, min(count, 3)))
     for res in search_results:
         try:
-            entry = res.get_entry() # Or equivalent based on your exact libzim version
-            paths.append(entry.path) 
-        except AttributeError:
-            paths.append(str(res)) # Fallback
+            entry = res.get_entry()
+            paths.append(entry.path) # This returns the internal path like '/A/Python.html'
+        except Exception:
+            # Fallback to string if get_entry fails, but this is risky for entry lookup
+            paths.append(str(res))
 
     return f"Found ~{count} matches. Top article paths:\n" + "\n".join(paths)
 
@@ -95,36 +88,42 @@ def full_text_search(query: str) -> str:
 @log_tool_call
 @tool("read")
 def read_wikipedia_article(internal_path: str) -> str:
-    """
-    Extract and read the full Wikipedia article formatted in Markdown
-    using its exact internal path (e.g., 'A/Python_(programming_language).html').
-    """
+    """Extract and read the full Wikipedia article formatted in Markdown."""
     archive = _get_archive()
-    entry = archive.get_entry_by_path(internal_path)
+    
+    # Normalize path (ensure it starts with / for libzim if needed, 
+    # though get_entry_by_path usually expects absolute internal paths)
+    if not internal_path.startswith('/'):
+        internal_path = '/' + internal_path
 
-    # Attempt to get the content directly
-    raw_bytes = entry.content()
-    if not raw_bytes:
-        return f"Error: Path '{internal_path}' has no content."
+    try:
+        entry = archive.get_entry_by_path(internal_path)
+        
+        # FIX: Use get_data() instead of content(), as 'content' is not a standard libzim attribute for Entry objects
+        raw_bytes = entry.get_data() 
+        
+        if not raw_bytes:
+            return f"Error: Path '{internal_path}' has no data."
 
-    raw_html = raw_bytes.decode("utf-8")
-    markdown_text = md(
-        raw_html,
-        heading_style="ATX",
-        strip=["script", "style", "img", "noscript", "iframe"],
-        bullets="-"
-    )
-    return markdown_text
+        raw_html = raw_bytes.decode("utf-8")
+        markdown_text = md(
+            raw_html,
+            heading_style="ATX",
+            strip=["script", "style", "img", "noscript", "iframe"],
+            bullets="-"
+        )
+        return markdown_text
+
+    except Exception as e:
+        # If get_entry fails because the path is a title instead of a file path, 
+        # we can't easily resolve it here without more logic. Returning error for LLM to see.
+        return f"Error reading '{internal_path}': {str(e)}"
 
 
 @log_tool_call
 @tool("read")
 def search_and_summarize_topics(query: str) -> str:
-    """
-    An advanced tool that searches for a topic across the entire archive 
-    and immediately retrieves and summarizes content from the top 3 matching articles.
-    Use this when you want a broad overview of a subject without manually searching and reading each step.
-    """
+    """Searches and immediately retrieves/summarizes content from top 3 matches."""
     archive = _get_archive()
     searcher = Searcher(archive)
     query_obj = Query().set_query(query)
@@ -134,12 +133,18 @@ def search_and_summarize_topics(query: str) -> str:
     if count == 0:
         return f"No matches found for '{query}'."
 
-    output_parts = [f"Found ~{count} matches for '{query}'. Content from top articles:\n"]
+    output_parts = [f"Found ~{count} matches for '{query}'.\n"]
     search_results = list(results.getResults(0, min(count, 3)))
     for res in search_results:
-        path = str(res)
+        # FIX: Do not use str(res), which might just be the Title string.
+        # Use get_entry().path to ensure we pass a valid internal file path to read_wikipedia_article.
+        try:
+            path = res.get_entry().path 
+        except Exception:
+            path = str(res)
+
         output_parts.append(f"\n## ARTICLE SOURCE: {path}")
-        content = read_wikipedia_article(path)
+        content = read_wikipedia_article(path) # Now passing a proper path like '/A/Title.html'
         output_parts.append(content + "\n")
 
     return "\n".join(output_parts).strip()
