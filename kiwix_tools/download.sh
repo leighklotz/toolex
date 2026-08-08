@@ -1,4 +1,4 @@
-#!/usr/bine/env -S bash -x
+#!/usr/bin/env -S bash -x
 
 SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE}")")"
 
