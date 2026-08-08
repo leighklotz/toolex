@@ -15,7 +15,7 @@ ask What is the Logo programming language | tools kiwix
      ==> Found ~2000 matches...✨
 ```
 
-## AI Response
+## Response
 
 **Logo** is an educational programming language originally designed in **1967** by **Wally Feurzeig, Seymour Papert, and Cynthia Solomon** at Bolt, Beranek and Newman. The name derives from the Greek word *logos*, meaning "word" or "thought."
 
@@ -68,4 +68,3 @@ Several active dialects exist today, including:
 - **FMSLogo / KLogo**
 
 In short, Logo is less of a "coding tool for jobs" and more of a **pedagogical breakthrough** that taught generations of students how to think algorithmically, visualize code execution, and approach problem-solving systematically.
-
