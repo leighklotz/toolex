@@ -40,13 +40,17 @@ def log_kiwix_call(func):
             
         # Truncate multiline inputs for readable CLI output
         if "\n" in str(display):
-            display = str(display).partition("\n")[0]
+            display = str(display).partition("\n")[0][0:10].strip()
             
         print(f"🚀 {func.__name__} {display}", file=sys.stderr, end='')
         try:
             result = func(*args, **kwargs)
             if result is not None:
-                print(f" ==> {str(result)[:20].strip()}...", file=sys.stderr, end='')
+                result_display = result
+                if "\n" in str(result_display):
+                    result_display = result_display.partition("\n")[0].strip()
+                result_display = result_display.partition("\n")[0][0:20].strip()
+                print(f" ==> {str(result_display)}...", file=sys.stderr, end='')
             return result
         except Exception as e:
             print(f" ❌ {func.__name__} ERROR: {e}", file=sys.stderr)
@@ -130,6 +134,17 @@ def read_wikipedia_article(internal_path: str) -> str:
     if not entry:
         return f"Error: Entry for '{internal_path}' could not be resolved."
 
+    # FIX: Follow redirects to get the actual article content
+    # This prevents returning the title/redirect page instead of the article
+    while entry.is_redirect:
+        try:
+            entry = entry.get_target_entry()
+        except Exception:
+            break
+
+    if not entry:
+        return f"Error: Entry for '{internal_path}' could not be resolved."
+
     try:
         raw_bytes = entry.get_item().content 
         if not raw_bytes:
@@ -142,7 +157,7 @@ def read_wikipedia_article(internal_path: str) -> str:
             strip=["script", "style", "img", "noscript", "iframe"],
             bullets="-"
         )
-        return markdown_text
+        return markdown_text.strip()
     except Exception as e:
         raise RuntimeError(f"Failed to process article content for '{internal_path}': {e}") from e
 
