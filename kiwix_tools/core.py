@@ -9,19 +9,19 @@ from libzim.search import Query, Searcher
 from markdownify import markdownify as md
 from tooling import tool, discover_tools
 
-# --- CONFIGURATION & CACHE ---
 # Some code modified from https://github.com/mozanunal/llm-tools-kiwix/blob/main/README.md / APACHE 2.0
 
-ZIM_FILE = "/home/klotz/wip/toolex/kiwix_tools/zims/wikipedia_en_all_mini_2026-06.zim"
-ZIM_PATH = os.environ.get("KIWIX_ZIM_PATH", ZIM_FILE)
+# --- CONFIGURATION & CACHE ---
+KIWIX_ZIM_DIR = os.environ.get("KIWIX_ZIM_DIR", "/home/klotz/wip/toolex/kiwix_tools/zims/")
+KIWIX_ZIM_PATH = Path(KIWIX_ZIM_DIR, Path(os.environ.get("KIWIX_ZIM_FILE", "wikipedia_en_all_mini_2026-06.zim")))
 _ARCHIVE_CACHE = None
 
 def _get_archive():
     global _ARCHIVE_CACHE
     if _ARCHIVE_CACHE is None:
-        path_obj = Path(ZIM_PATH)
+        path_obj = Path(KIWIX_ZIM_PATH)
         if not path_obj.exists():
-             raise FileNotFoundError(f"ZIM file not found at {ZIM_PATH}")
+             raise FileNotFoundError(f"ZIM file not found at {KIWIX_ZIM_PATH}")
         _ARCHIVE_CACHE = Archive(str(path_obj))
     return _ARCHIVE_CACHE
 
@@ -65,7 +65,7 @@ def search_wikipedia_titles(query: str) -> str:
     using `full_text_search` before calling `read_wikipedia_article`.
     """
     result = subprocess.run(
-        ["kiwix-search", "--suggestion", ZIM_PATH, query],
+        ["kiwix-search", "--suggestion", KIWIX_ZIM_PATH, query],
         capture_output=True,
         text=True,
         check=True
