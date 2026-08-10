@@ -86,6 +86,7 @@ def bash_wrap(name: str, cmd: List[str]):
 
             print(f"🚀{' '.join(cmd)} {arg_payload}", file=sys.stderr, end='')
             return run_bash_tool(name, cmd, arg_payload, stdin_data=stdin_data)
+        wrapper._command_name = name
         return wrapper
     return decorator
 

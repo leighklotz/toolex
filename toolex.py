@@ -202,6 +202,18 @@ def main(args):
     MODS_LIST = []
     TOOL_EXECUTION_MAP = {} # Map function name -> module object for fast lookup during loop
 
+    all_commands_registry = {}
+    for mod in MODS_LIST:
+        for name, obj in inspect.getmembers(mod, inspect.isfunction):
+            if getattr(obj, "_command_name", None):
+                # Map 'ls' -> get_ls
+                all_commands_registry[getattr(obj, "_command_name")] = obj
+
+    # Inject the all_commands registry into modules that provide a setter (like minishell)
+    for mod in MODS_LIST:
+        if hasattr(mod, "set_tool_registry"):
+            mod.set_tool_registry(all_commands_registry)
+
     for modname in permission_map.keys():
         try:
             mod = importlib.import_module(modname)
