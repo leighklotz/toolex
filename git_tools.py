@@ -76,7 +76,7 @@ def do_git_checkout(args: Optional[str] = "") -> Dict[str, str]:
 
 @tool("write")
 @bash_wrap("git_commit", ["git", "commit"])
-def do_commit_checkout(args: Optional[str] = "") -> Dict[str, str]: 
+def do_git_checkout(args: Optional[str] = "") -> Dict[str, str]: 
     """`git commit`: adds changes to local repository."""
     pass
 
