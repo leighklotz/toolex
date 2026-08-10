@@ -202,6 +202,7 @@ def main(args):
     MODS_LIST = []
     TOOL_EXECUTION_MAP = {} # Map function name -> module object for fast lookup during loop
 
+    # Build the all_commands_registry
     all_commands_registry = {}
     for mod in MODS_LIST:
         for name, obj in inspect.getmembers(mod, inspect.isfunction):
