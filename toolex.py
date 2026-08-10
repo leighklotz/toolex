@@ -109,18 +109,6 @@ def build_tools_from_modules(modules: List[Any], permission_map: Dict[str, set])
                     tools.append(generate_openai_schema(obj))
     return tools
 
-def tool_to_module_name(user_tool_id: str) -> tuple[str, str]:
-    """
-    Converts 'foo' or 'foo:read' into ('foo_tools', permission).
-    If no permission is present, default to ":read".
-    User must include ":all" or ":write" etc over override readonly.
-    """
-    if ":" in user_tool_id:
-        base_name, perm = user_tool_id.split(":", 1)
-    else:
-        base_name, perm = user_tool_id, "read"
-    return f"{base_name}_tools", perm
-
 def execute_tool(tool_module_obj, tool_func_name: str, *args, **kwargs):
     """Execute a registered tool by name from its module."""
     try:
@@ -146,17 +134,26 @@ def find_module_for_func(mod_registry: Dict[str, Any], func_name: str):
 
 def parse_permissions(args_list):
     """
-    Converts ['foo', 'git:all'] into:
-    { 'foo_tools': {'read'}, 'git_tools': {'all'} }
-    Errors if tool or permission does not exist.
+    Converts ['foo', 'foo:read', 'foo:read:write'] into:
+    { 'foo_tools': {'read'}, 'foo_tools': {'read', 'write'} }
+    Handles multiple permissions separated by colons after the module name.
     """
     mapping = {}
     for item in args_list:
-        modname, perm = tool_to_module_name(item)
+        # Split on first colon to separate module name from permissions
+        if ":" in item:
+            base_name, *perm_list = item.split(":")
+            requested_perms = set(perm_list)
+        else:
+            base_name = item
+            requested_perms = {"read"}
+
+        modname = f"{base_name}_tools"
+
         if modname not in mapping:
             spec = importlib.util.find_spec(modname)
             if spec is None:
-                logger.error(f"Tool {item} does not exist")
+                logger.error(f"Tool module '{modname}' does not exist")
                 sys.exit(1)
             mapping[modname] = set()
 
@@ -167,14 +164,16 @@ def parse_permissions(args_list):
                 caps = getattr(obj, "_required_caps", {"read"})
                 valid_perms.update(caps if isinstance(caps, (set, list)) else {caps})
 
-        if perm == "all":
+        # Handle 'all' permission (takes precedence if present)
+        if "all" in requested_perms:
             mapping[modname].add("all")
-        elif perm in valid_perms:
-            mapping[modname].add(perm)
         else:
-            logger.error(f"Permission '{perm}' does not exist for tool {item}")
-            sys.exit(1)
-
+            for p in requested_perms:
+                if p in valid_perms:
+                    mapping[modname].add(p)
+                else:
+                    logger.error(f"Permission '{p}' does not exist for tool {base_name}")
+                    sys.exit(1)
     return mapping
 
 def main(args):
@@ -356,7 +355,7 @@ if __name__ == "__main__":
         "--tools",
         nargs="+", 
         default=[],
-        help="List of tools/permissions (e.g., --tools git weather:read)",
+        help="List of tools/permissions (e.g., --tools git git:read:write weather:read)",
     )
     parser.add_argument(
         "--log-level",
@@ -388,4 +387,3 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n[!] Interrupted by user. Exiting")
         sys.exit(1)
-
