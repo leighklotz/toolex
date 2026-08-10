@@ -7,20 +7,20 @@
 ## Project layout
 
 ```text
-├── bash_tools.py       # shell-related utilities (ls, pwd, command execution, etc.)
-├── git_tools.py        # git-related tools (status, diff, etc.)
-├── help-commit.sh      # Bash helper that asks the LLM to generate a commit command
-├── toolex.py           # Thin client that talks to a local /v1/chat/completions endpoint
-├── toolex.sh           # Convenience shell wrapper for `toolex.py`
-├── tooling.py          # Decorator & CLI helpers used by all tools
-├── weather_tools.py    # A duplicate of get_weather for demonstration
-├── __init__.py
-└── README.md           # ← you’re here
+├─── bash_tools.py       # shell-related utilities (ls, pwd, command execution, etc.)
+├─── git_tools.py        # git-related tools (status, diff, merge, commit, etc.)
+├─── help-commit.sh      # Bash helper that asks the LLM to generate a commit command
+├─── toolex.py           # Thin client that talks to a local /v1/chat/completions endpoint
+├─── toolex.sh           # Convenience shell wrapper for `toolex.py`
+├─── tooling.py          # Decorator & CLI helpers used by all tools
+├─── weather_tools.py    # A duplicate of get_weather for demonstration
+├─── __init__.py
+└─── README.md           # ← you're here
 ```
 
 * `tooling.py` – defines the `@tool` decorator and `run_tool` helper.
 * `bash_tools.py` – registers a handful of **shell** utilities (ls, pwd, cat, find, command execution, etc.).
-* `git_tools.py` – registers a handful of **git** utilities (status, diff, merge, etc.).
+* `git_tools.py` – registers a handful of **git** utilities (status, diff, merge, commit, etc.).
 * `toolex.py` – parses CLI arguments, auto‑generates *OpenAI-style* tool schemas, sends a request to the `VIA_API_CHAT_BASE` (defaults to `http://127.0.0.1:5000/`), and orchestrates the tool calls.
 * `help-commit.sh` – shows how to build a prompt that instructs the model to inspect the repository and emit a `git commit -a` command. It relies on `unfence` to confirm you want to run the committed command.
 
@@ -80,7 +80,7 @@ The client will:
 * `help-commit.sh` creates a prompt that asks the model to:
   * Run `git status` and `git diff`.
   * Print a commit command in a fenced bash block **or** say nothing if there are no changes.
-* `unfence` prompts you “Y or N?” before piping the command to `bash`.
+* `unfence` prompts you "Y or N?" before piping the command to `bash`.
 * The result is a one‑liner `git commit -a -m "…"` with proper quoting.
 
 Example output (when changes exist):
@@ -98,7 +98,6 @@ git commit -a \
   -m "Add new utility functions" \
   -m "Refactor CLI handling" \
   -m "Update README"
-\```
 ````
 
 If there are no changes to commit:
@@ -110,40 +109,34 @@ echo no changes
 ```
 ````
 
-#### Run the client with multiple tools
-```bash
-./toolex.py --tools git weather "What is the ratio of git commits to current temperature in Paris?"
-```
-
-The client will:
-1. Discover all functions decorated with `@tool`.
-2. Build the OpenAI tool schema and send the prompt.
-3. When the model decides to call a tool, the script will invoke it locally... (etc)
-
 ## Command Line Arguments
 
 | Argument | Description | Default |
 | :--- | :--- | :--- |
-| `--tools <module[:perm]...` | List of tools and permissions available to the LLM. | None |
+| `--tools <module[:perm]...` | List of tools and permissions available to the LLM. Supports multiple permissions per module using colons (e.g., `git:read:write`). | None |
 | `--workspace-dir <path>` | Sets the working directory for podbash tools | Current dir / `$TOOLEX_WORKSPACE_DIR` |
 
 ## Extending the system
 
 * **Add a new module** – put a `.py` file with one or more `@tool` functions.
-* **Tell the client** – pass the module name via `--tools`. You can restrict access using colon-separated permissions (e.g., `:read`, `:write`) or grant full access to all capabilities defined in a module by using `:all`.
+* **Tell the client** – pass the module name via `--tools`. You can restrict access using colon-separated permissions. Multiple permissions can be specified for a single module (e.g., `git:read:write`), or grant full access to all capabilities using `:all`.
 
   ```bash
-  # Default behavior: uses ':read' permission for git_tools
+  # Default behavior: uses 'read' permission for git_tools
   ./toolex.py --tools git "What is the status?"
 
   # Explicitly request read-only mode via specific capability
   ./toolex.py --tools git:read "Show me diff"
 
-  # Grant all capabilities defined in the module (e.g., write, execute)
+  # Grant multiple specific permissions (e.g., read and write)
+  ./toolex.py --tools git:read:write "List files and commit changes"
+
+  # Grant all capabilities defined in the module
   ./toolex.py --tools git:all "Commit these changes"
 
   # Mixing multiple modules with different permissions
   ./toolex.py --tools bash:read --tools git:write "List files and then commit them"
+  ```
 
 ## Pipeline Mode (JSON)
 
