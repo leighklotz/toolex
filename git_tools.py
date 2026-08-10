@@ -74,6 +74,12 @@ def do_git_checkout(args: Optional[str] = "") -> Dict[str, str]:
     """`git checkout`: switches branches or restores files."""
     pass
 
+@tool("write")
+@bash_wrap("git_commit", ["git", "commit"])
+def do_git_checkout(args: Optional[str] = "") -> Dict[str, str]: 
+    """`git commit`: adds changes to local repository."""
+    pass
+
 
 ### File must end with this line
 __all__ = discover_tools(globals(), __name__)
