@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 import shlex
 import inspect
+import sys
 from typing import Dict, Callable
 from tooling import tool, CommandResult, discover_tools
 
@@ -34,6 +35,7 @@ class MiniShell:
 
     def _run_step(self, name: str, args: str, input_data: str) -> CommandResult:
         if name in self.tool_registry:
+            print(f"⚙️ minishell: {name} {args} ".rstrip(), file=sys.stderr, end='')
             func = self.tool_registry[name]
             sig = inspect.signature(func)
             param_names = [p.name for p in sig.parameters.values()]

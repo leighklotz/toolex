@@ -200,7 +200,19 @@ def main(args):
     # Permission mapping and module loading logic
     permission_map = parse_permissions(args.tools) 
     MODS_LIST = []
-    TOOL_EXECUTION_MAP = {} # Map function name -> module object for fast lookup during loop
+    TOOL_EXECUTION_MAP = {}
+
+    # load modules (Populate MODS_LIST)
+    for modname in permission_map.keys():
+        try:
+            mod = importlib.import_module(modname)
+            MODS_LIST.append(mod)
+            # Populate map for direct function calls (the 'write' tools etc.)
+            for name, obj in inspect.getmembers(mod, inspect.isfunction):
+                if getattr(obj, "_is_toolex_tool", False):
+                    TOOL_EXECUTION_MAP[name] = mod
+        except ImportError:
+             logger.error(f"Could not load {modname}")
 
     # Build the all_commands_registry
     all_commands_registry = {}
@@ -229,6 +241,7 @@ def main(args):
     TOOLS = build_tools_from_modules(MODS_LIST, permission_map)
     executed_states = set()
     for i in range(args.total_iterations):
+        logger.debug(f"toolex iteration {i=}/{args.total_iterations}")
         # If assistant is done thinking and has no tool calls, it's a final response
         if (
             messages
