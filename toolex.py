@@ -250,11 +250,11 @@ def main(args):
             )
 
             if current_turn_calls in executed_states:
-                logger.warning("Stall detected: LLM generated identical tool arguments as a previous turn.")
+                logger.warning(f"Stall detected: LLM generated identical tool arguments as a previous turn: {current_turn_calls=}")
                 
                 messages.append({
                     "role": "user",
-                    "content": "[System Error: Infinite execution loop terminated. You are passing identical parameters back to the same tool. Abandon this loop and summarize your progress immediately.]"
+                    "content": "[System Error: Infinite execution loop terminated. You are passing identical parameters back to the same tool. If you cannot fix the problem immediately, abandon this loop and summarize your progress immediately.]"
                 })
                 
                 try:
