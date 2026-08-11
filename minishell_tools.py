@@ -14,6 +14,7 @@ class MiniShell:
         self.tool_registry = tool_registry
 
     def execute(self, command_line: str) -> CommandResult:
+        print(f"⚙️{command_line} ".rstrip(), file=sys.stderr, end='')
         stages = [s.strip() for s in re.split(r'\s*\|\s*', command_line) if s.strip()]
         if not stages:
             return CommandResult("", "Empty pipeline", 1)
@@ -35,7 +36,9 @@ class MiniShell:
 
     def _run_step(self, name: str, args: str, input_data: str) -> CommandResult:
         if name in self.tool_registry:
-            print(f"⚙️ minishell: {name} {args} ".rstrip(), file=sys.stderr, end='')
+            if False:
+                # usually redundant with the tool itself
+                print(f"⚙️".rstrip(), file=sys.stderr, end='')
             func = self.tool_registry[name]
             sig = inspect.signature(func)
             param_names = [p.name for p in sig.parameters.values()]
