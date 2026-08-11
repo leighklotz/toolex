@@ -4,43 +4,43 @@ import sys
 import subprocess
 import inspect
 from typing import Dict, List, Optional
-from tooling import tool, run_bash_tool, bash_wrap, discover_tools
+from tooling import tool, discover_tools, CommandResult
+from engines import exec_wrap
 from functools import wraps
+from engines import Engine
 
 
+@tool("read")
+def minishell_execute(command_line: str) -> CommandResult:
+    """
+    Execute a piped command line using available tools.
+    Example: 'ls | grep py'
+    Supports pipe '|' and propagates exit codes. No redirects.
+    """
+    return Engine.engine.run(command_line)
 
 # ----------------------------------------------------------------------
 # Public tools
 # ----------------------------------------------------------------------
 @tool("read")
-@bash_wrap("ls", ["ls"])
-def get_ls(args: Optional[str] = "") -> Dict[str, str]:
-    """List directory contents. Args: standard 'ls' flags and paths."""
-    pass
+@exec_wrap(Engine.engine, "ls")
+def get_ls(args=""): pass
 
 @tool("read")
-@bash_wrap("pwd", ["pwd"])
-def get_pwd(args: Optional[str] = "") -> Dict[str, str]:
-    """Print current working directory using 'pwd'."""
-    pass
+@exec_wrap(Engine.engine, "pwd")
+def get_pwd(args): pass
 
 @tool("read")
-@bash_wrap("cat", ["cat"])
-def get_cat(args: Optional[str] = "", stdin: Optional[str] = None) -> Dict[str, str]:
-    """Read file contents. Args: filename and options (e.g., '-n')."""
-    pass
+@exec_wrap(Engine.engine, "cat")
+def get_cat(args, stdin): pass
 
 @tool("read")
-@bash_wrap("whoami", ["whoami"])
-def get_whoami(args: Optional[str] = "") -> Dict[str, str]:
-    """Display the current effective username."""
-    pass
+@exec_wrap(Engine.engine, "whoami")
+def get_whoami(args): pass
 
 @tool("read")
-@bash_wrap("date", ["date"])
-def get_date(args: Optional[str] = "") -> Dict[str, str]:
-    """Print system date and time."""
-    pass
+@exec_wrap(Engine.engine, "date")
+def get_date(args): pass
 
 def validate_find_args(func):
     @wraps(func)
@@ -68,46 +68,32 @@ def validate_find_args(func):
 
 @tool("read")
 @validate_find_args
-@bash_wrap("find", ["find"])
-def get_find(args: Optional[str] = "") -> Dict[str, str]:
-    """Search for files in a directory hierarchy. Args: search expression/paths."""
-    pass
+@exec_wrap(Engine.engine, "find")
+def get_find(args): pass
 
 @tool("read")
-@bash_wrap("df", ["df"])
-def get_df(args: Optional[str] = "") -> Dict[str, str]:
-    """Report file system disk space usage. Args: mountpoints or flags."""
-    pass
+@exec_wrap(Engine.engine, "df")
+def get_df(args): pass
 
 @tool("read")
-@bash_wrap("wc", ["wc"])
-def get_wc(args: Optional[str] = "", stdin: Optional[str] = None) -> Dict[str, str]:
-    """Print newline, word, and byte counts. Args: filename and options."""
-    pass
+@exec_wrap(Engine.engine, "wc")
+def get_wc(args, stdin): pass
 
 @tool("read")
-@bash_wrap("head", ["head"])
-def get_head(args: Optional[str] = "", stdin: Optional[str] = None) -> Dict[str, str]:
-    """Output head lines of input or file"""
-    pass
+@exec_wrap(Engine.engine, "head")
+def get_head(args, stdin): pass
 
 @tool("read")
-@bash_wrap("tail", ["tail"])
-def get_tail(args: Optional[str] = "", stdin: Optional[str] = None) -> Dict[str, str]:
-    """Output tail lines of input or file"""
-    pass
+@exec_wrap(Engine.engine, "tail")
+def get_tail(args, stdin): pass
 
 @tool("read")
-@bash_wrap("grep", ["grep"])
-def get_grep(args: Optional[str] = "", stdin: Optional[str] = None) -> Dict[str, str]:
-    """Search for patterns in text using regular expressions. Args: pattern/file/flags."""
-    pass
+@exec_wrap(Engine.engine, "grep")
+def get_grep(args, stdin): pass
 
 @tool("write")
-@bash_wrap("patch", ["patch"])
-def get_grep(args: Optional[str] = "", stdin: Optional[str] = None) -> Dict[str, str]:
-    """Posix patch program."""
-    pass
+@exec_wrap(Engine.engine, "patch")
+def get_grep(args, stdin): pass
 
 ### File must end with this line
 __all__ = discover_tools(globals(), __name__)

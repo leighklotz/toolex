@@ -1,6 +1,56 @@
 #!/usr/bin/env python3
 from typing import Dict, List, Optional
-from tooling import tool, run_bash_tool, bash_wrap, discover_tools
+from tooling import tool, run_bash_tool, bash_wrap, discover_tools, CommandResult
+
+### THese two are legacy
+### New tools with engine factoring do not yet support subcommand restrictions (git foo)
+
+def run_bash_tool(name: str, cmd: List[str], args: Optional[str] = "", stdin_data: Optional[str] = None) -> CommandResult:
+    """Runs the command directly on host machine with stdin support."""
+    args_list = shlex.split(args) if args and args.strip() else []
+    full_cmd = list(cmd) + args_list
+
+    try:
+        result = subprocess.run(
+            full_cmd,
+            cwd=os.getcwd(),
+            capture_output=True,
+            text=True,
+            input=stdin_data
+        )
+        return CommandResult(stdout=result.stdout, stderr=result.stderr, exit_code=result.returncode)
+    except Exception as exc:
+        return CommandResult("", str(exc), 1)
+
+
+def bash_wrap(name: str, cmd: List[str]):
+    """Runs the command directly on host machine."""
+    def decorator(f: Callable) -> Callable:
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            sig = inspect.signature(f)
+            param_names = [p.name for p in sig.parameters.values()]
+
+            payload = None
+            if args and not isinstance(args[0], (dict, list)):
+                payload = args[0]
+            elif "args" in kwargs:
+                payload = kwargs["args"]
+
+            arg_payload = str(payload).strip() if payload is not None else ""
+
+            stdin_data = None
+            for p in ("stdin", "input_data"):
+                if p in param_names and p in kwargs:
+                    stdin_data = kwargs.get(p)
+                    break
+
+            print(f"🚀{' '.join(cmd)} {arg_payload}", file=sys.stderr, end='')
+            return run_bash_tool(name, cmd, arg_payload, stdin_data=stdin_data)
+        wrapper._command_name = name
+        return wrapper
+    return decorator
+
 
 # --- READ ONLY TOOLS (Standard) ---
 

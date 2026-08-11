@@ -6,7 +6,7 @@ import shlex
 import inspect
 import sys
 from typing import Dict, Callable
-from tooling import tool, CommandResult, discover_tools
+from tooling import tool, CommandResult
 
 
 class MiniShell:
@@ -72,25 +72,3 @@ class MiniShell:
         return CommandResult("", f"Unknown command: {name}", 127)
 
 
-# Global registry built from imported tools
-# This will be populated at runtime by the orchestrator
-_TOOL_REGISTRY: Dict[str, Callable] = {}
-
-
-def set_tool_registry(registry: Dict[str, Callable]):
-    global _TOOL_REGISTRY
-    _TOOL_REGISTRY = registry
-
-
-@tool("read")
-def minishell_execute(command_line: str) -> CommandResult:
-    """
-    Execute a piped command line using available tools.
-    Example: 'ls | grep py'
-    Supports pipe '|' and propagates exit codes. No redirects.
-    """
-    shell = MiniShell(_TOOL_REGISTRY)
-    return shell.execute(command_line)
-
-
-__all__ = discover_tools(globals(), __name__)

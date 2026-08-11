@@ -1,3 +1,4 @@
+228
 #!/usr/bin/env python3
 
 #  **Usage examples**
@@ -17,6 +18,8 @@ import sys
 from typing import get_origin, get_args, Union, Any, Dict, List, Annotated, get_type_hints
 import argparse
 
+from engines import Engine
+
 # Logging
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +34,7 @@ MODEL = os.getenv("MODEL", 'gemma-4-26b-qat-batch')
 URL = f"{VIA_API_CHAT_BASE}/v1/chat/completions"
 MAGIC_HEADER = "Content-Type: application/x-llm-history+json"
 FAIL_ON_TOOL_ERROR = False
+
 
 def generate_openai_schema(obj):
     """Generates an OpenAI tool schema using Strategic Docstrings and Annotated metadata."""
@@ -222,11 +226,11 @@ def main(args):
                 # Map 'ls' -> get_ls
                 all_commands_registry[getattr(obj, "_command_name")] = obj
 
-    # Inject the all_commands registry into modules that provide a setter (like minishell)
-    for mod in MODS_LIST:
-        if hasattr(mod, "set_tool_registry"):
-            mod.set_tool_registry(all_commands_registry)
+    logger.warning(f"Engine.set_engine({args.engine}, all_commands_registry)")
+    Engine.set_engine(args.engine, all_commands_registry)
+    print(f"toolex {Engine.engine=}", file=sys.stderr)
 
+    # permissions
     for modname in permission_map.keys():
         try:
             mod = importlib.import_module(modname)
@@ -341,7 +345,7 @@ def main(args):
                     if FAIL_ON_TOOL_ERROR:
                         raise e
                     else:
-                        logger.error(f"Reporting tool execution error: {e}")
+                        logger.error("Tool execution error", stack_info=True, exc_info=True)
                         # Append error to messages so LLM knows why it failed instead of crashing
                         messages.append({
                             "role": "tool",
@@ -407,8 +411,10 @@ if __name__ == "__main__":
         help="Maximum tool iterations, total. Default 30",
         default=30
     )
+    parser.add_argument("--engine", choices=["host","podman","minishell"], default="minishell")
     args = parser.parse_args()
     try:
+        print(f"* toolex {args=}\n", file=sys.stderr)
         main(args)
     except KeyboardInterrupt:
         print("\n[!] Interrupted by user. Exiting")
