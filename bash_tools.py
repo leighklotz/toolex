@@ -103,5 +103,11 @@ def get_grep(args: Optional[str] = "", stdin: Optional[str] = None) -> Dict[str,
     """Search for patterns in text using regular expressions. Args: pattern/file/flags."""
     pass
 
+@tool("write")
+@bash_wrap("patch", ["patch"])
+def get_grep(args: Optional[str] = "", stdin: Optional[str] = None) -> Dict[str, str]:
+    """Posix patch program."""
+    pass
+
 ### File must end with this line
 __all__ = discover_tools(globals(), __name__)
