@@ -25,6 +25,21 @@ def _get_archive():
         _ARCHIVE_CACHE = Archive(str(path_obj))
     return _ARCHIVE_CACHE
 
+# --- CONTEXT SIZE GUARDS ---
+MAX_ARTICLE_CHARS = 8000   # ~2k tokens
+
+def _truncate(text: str, max_chars: int = MAX_ARTICLE_CHARS) -> str:
+    if not text:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    truncated = text[:max_chars].rstrip()
+    # Avoid cutting mid-word
+    last_space = truncated.rfind(' ')
+    if last_space > max_chars * 0.8:
+        truncated = truncated[:last_space]
+    return truncated + "\n\n...[truncated to keep context size]..."
+
 # --- LOGGING DECORATOR ---
 def log_kiwix_call(func):
     """Logs kiwix/ZIM tool invocations to stderr with clean CLI formatting."""
@@ -112,6 +127,10 @@ def read_wikipedia_article(internal_path: str) -> str:
     if not path.startswith('/'):
         path = '/' + path
 
+    # Guardrail: skip large portal pages
+    if path.startswith('/Portal:') or '/Portal/' in path:
+        return f"[Portal page skipped to avoid large context: {path}]"
+
     entry = None
     try:
         entry = archive.get_entry_by_path(path)
@@ -157,7 +176,9 @@ def read_wikipedia_article(internal_path: str) -> str:
             strip=["script", "style", "img", "noscript", "iframe"],
             bullets="-"
         )
-        return markdown_text.strip()
+        markdown_text = markdown_text.strip()
+        # Hard-cap article output to keep context size safe
+        return _truncate(markdown_text)
     except Exception as e:
         raise RuntimeError(f"Failed to process article content for '{internal_path}': {e}") from e
 
@@ -183,8 +204,15 @@ def search_and_summarize_topics(query: str) -> str:
         except Exception:
             path = str(res)
 
+        # Guardrail: skip portals
+        if path.startswith('/Portal:') or '/Portal/' in path:
+            output_parts.append(f"\n## ARTICLE SOURCE: {path}\n[Portal page skipped to avoid large context]\n")
+            continue
+
         output_parts.append(f"\n## ARTICLE SOURCE: {path}")
         content = read_wikipedia_article(path)
-        output_parts.append(content + "\n")
+        # Per-article excerpt cap for summarize tool
+        excerpt = _truncate(content, max_chars=2000)
+        output_parts.append(excerpt + "\n")
 
     return "\n".join(output_parts).strip()
