@@ -278,8 +278,8 @@ def main(args):
                 "tool_calls": assistant_msg.get("tool_calls") or [],
             }
 
-            # If not drop_reasoning, maintain logic/context chain
-            if not args.drop_reasoning and "reasoning_content" in assistant_msg:
+            # If not drop_tool_reasoning, maintain logic/context chain
+            if not args.drop_tool_reasoning and "reasoning_content" in assistant_msg:
                 history_entry["reasoning_content"] = assistant_msg["reasoning_content"]
                 logger.debug("Appended reasoning content to history.")
 
@@ -371,10 +371,10 @@ if __name__ == "__main__":
         help="Workspace directory to mount into the sandbox when using podbash tools (default: TOOLEX_WORKSPACE_DIR env var or current directory)",
     )
     parser.add_argument(
-        "--drop-reasoning",
-        action="store_true",
-        help="Drop reasoning_content from tool call history, preventing the model from seeing its own thoughts in subsequent turns.",
-    )
+            "--drop-tool-reasoning",
+            action="store_true",
+            help="Drop reasoning_content from assistant messages inside the tool loop"
+        )
     parser.add_argument(
         "--total-iterations",
         type=int,
