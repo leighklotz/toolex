@@ -23,6 +23,49 @@ def check_working_dir(file_path):
     if not Path(file_path).resolve().is_relative_to(Path(WORKING_DIR).resolve()):
         raise Exception(f"cannot access {file_path=} as it is not inside working directory {WORKING_DIR=}")
 
+def _read_file_impl(file_path):
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        return f"Error: File not found at {file_path}"
+    except Exception as e:
+        return f"Error reading file: {e}"
+
+def _write_file_impl(file_path, content):
+    try:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return "File written successfully."
+    except Exception as e:
+        return f"Error writing file: {e}"
+
+def _search_files_impl(file_pattern, search_string, case_insensitive, check_fn=None):
+    results = []
+    for file_path in glob.glob(file_pattern):
+        if os.path.isfile(file_path):
+            if check_fn:
+                check_fn(file_path)
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    if case_insensitive:
+                        if search_string.lower() in content.lower():
+                            results.append(file_path)
+                    else:
+                        if search_string in content:
+                            results.append(file_path)
+            except Exception as e:
+                print(f"Error reading file {file_path}: {e}", file=sys.stderr)
+    return "\n".join(results)
+
+def _do_edit(file_path, old_str, new_str):
+    with open(file_path, 'r', encoding='utf-8') as f:
+        file_content = f.read()
+    new_content = file_content.replace(old_str, new_str)
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(new_content)
+
 # tool name is python function name; @tool capabilities are permissions
 @tool(capabilities="read")
 def read_file_in_workdir(
@@ -31,13 +74,7 @@ def read_file_in_workdir(
     """Returns the contents of a text file as a single string."""
     print(f"🤖📥{file_path}", file=sys.stderr, end='')
     check_working_dir(file_path)
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    except FileNotFoundError:
-        return f"Error: File not found at {file_path}"
-    except Exception as e:
-        return f"Error reading file: {e}"
+    return _read_file_impl(file_path)
 
 @tool("read_anywhere")
 def read_file_anywhere(
@@ -45,13 +82,7 @@ def read_file_anywhere(
 ) -> str:
     """Returns the contents of a text file as a single string."""
     print(f"🤖📥{file_path}", file=sys.stderr, end='')
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    except FileNotFoundError:
-        return f"Error: File not found at {file_path}"
-    except Exception as e:
-        return f"Error reading file: {e}"
+    return _read_file_impl(file_path)
 
 @tool("write_anywhere")
 def write_file_anywhere(
@@ -60,12 +91,7 @@ def write_file_anywhere(
 ) -> str:
     """Writes text content to a file, overwriting existing content or creating new files."""
     print(f"🤖💾{file_path}", file=sys.stderr, end='')
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-        return "File written successfully."
-    except Exception as e:
-        return f"Error writing file: {e}"
+    return _write_file_impl(file_path, content)
 
 @tool(capabilities="write")
 def write_file_in_workdir(
@@ -75,12 +101,7 @@ def write_file_in_workdir(
     """Writes text content to a file, overwriting existing content or creating new files."""
     print(f"🤖💾{file_path}", file=sys.stderr, end='')
     check_working_dir(file_path)
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-        return "File written successfully."
-    except Exception as e:
-        return f"Error writing file: {e}"
+    return _write_file_impl(file_path, content)
 
 @tool(capabilities="edit")
 def edit_file_in_workdir(
@@ -92,21 +113,13 @@ def edit_file_in_workdir(
     check_working_dir(file_path)
     try:
         # Re-using logic from the user prompt but ensuring it's contained in this module context
-        with open(file_path, 'r', encoding='utf-8') as f:
-            file_content = f.read()
-
         if "replace:" not in edit_instructions:
             return "Error: Invalid edit instructions. You must use the format 'replace:old_string:new_string'"
-
         parts = edit_instructions.split(":", 2)
         if len(parts) < 3:
             return "Error: Invalid format. Use 'replace:old_string:new_string'"
-
         _, old_str, new_str = parts[0], parts[1], parts[2]
-        new_content = file_content.replace(old_str, new_str)
-
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(new_content)
+        _do_edit(file_path, old_str, new_str)
         return "File edited successfully."
     except FileNotFoundError:
         return f"Error: File not found at {file_path}"
@@ -122,19 +135,13 @@ def edit_file_anywhere(
     print(f"🤖📝✒️ {file_path}", file=sys.stderr, end='')
     try:
         # Re-using logic from the user prompt but ensuring it's contained in this module context
-        with open(file_path, 'r', encoding='utf-8') as f:
-            file_content = f.read()
         if not "replace:" in edit_instructions:
             return f"Error: Invalid edit instructions for {file_path=}. You must use the format 'replace:old_string:new_string'"
         parts = edit_instructions.split(":", 2)
         if len(parts) < 3:
             return f"Error: Invalid format for {file_path=}. Use 'replace:old_string:new_string'"
-
         _, old_str, new_str = parts[0], parts[1], parts[2]
-        new_content = file_content.replace(old_str, new_str)
-
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(new_content)
+        _do_edit(file_path, old_str, new_str)
         return f"File {file_path=} edited successfully."
     except Exception as e:
         return f"Error editing {file_path=}: {e}"
@@ -148,23 +155,7 @@ def search_files_in_workdir(
     """Searches through multiple files matching a pattern and returns names of files containing the search string."""
     case_icon = "🔡" if case_insensitive else ""
     print(f"🤖🔍{case_icon}'{search_string}' in '{file_pattern}'", file=sys.stderr, end='')
-
-    results = []
-    for file_path in glob.glob(file_pattern):
-        if os.path.isfile(file_path):
-            check_working_dir(file_path)
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    if case_insensitive:
-                        if search_string.lower() in content.lower():
-                            results.append(file_path)
-                    else:
-                        if search_string in content:
-                            results.append(file_path)
-            except Exception as e:
-                print(f"Error reading file {file_path}: {e}", file=sys.stderr)
-    return "\n".join(results)
+    return _search_files_impl(file_pattern, search_string, case_insensitive, check_fn=check_working_dir)
 
 @tool(capabilities="read_anywhere")
 def search_files_anywhere(
@@ -175,22 +166,7 @@ def search_files_anywhere(
     """Searches through multiple files matching a pattern and returns names of files containing the search string."""
     case_icon = "🔡" if case_insensitive else ""
     print(f"🤖🔍{case_icon}'{search_string}' in '{file_pattern}'", file=sys.stderr, end='')
-
-    results = []
-    for file_path in glob.glob(file_pattern):
-        if os.path.isfile(file_path):
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    if case_insensitive:
-                        if search_string.lower() in content.lower():
-                            results.append(file_path)
-                    else:
-                        if search_string in content:
-                            results.append(file_path)
-            except Exception as e:
-                print(f"Error reading file {file_path}: {e}", file=sys.stderr)
-    return "\n".join(results)
+    return _search_files_impl(file_pattern, search_string, case_insensitive, check_fn=None)
 
 
 ### File must end with this line
