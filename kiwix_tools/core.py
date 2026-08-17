@@ -57,7 +57,7 @@ def log_kiwix_call(func):
         if "\n" in str(display):
             display = str(display).partition("\n")[0][0:10].strip()
             
-        print(f"🚀 {func.__name__} {display}", file=sys.stderr, end='')
+        print(f"🚀{func.__name__} {display}", file=sys.stderr, end='')
         try:
             result = func(*args, **kwargs)
             if result is not None:
@@ -68,7 +68,7 @@ def log_kiwix_call(func):
                 print(f" ==> {str(result_display)}...", file=sys.stderr, end='')
             return result
         except Exception as e:
-            print(f" ❌ {func.__name__} ERROR: {e}", file=sys.stderr)
+            print(f"❌ {func.__name__} ERROR: {e}", file=sys.stderr)
             raise
     return wrapper
 
