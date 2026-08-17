@@ -8,7 +8,7 @@ from tooling import tool, discover_tools
 def get_weather(location: str) -> Dict[str, str]:
     """Return weather for a given location."""
     location = location.strip().lower()
-    print(f" 🤖weather {location}", file=sys.stderr, end='')
+    print(f"🤖weather {location}", file=sys.stderr, end='')
     if location in {"paris", "london"}:
         return {"temperature": "14°C", "condition": "partly cloudy"}
     return {"temperature": "unknown", "condition": "unknown"}
@@ -16,7 +16,7 @@ def get_weather(location: str) -> Dict[str, str]:
 @tool("read")
 def get_location() -> Dict[str, str]:
     """Return the location."""
-    print(f" 🤖get_location", file=sys.stderr, end='')
+    print(f"🤖get_location", file=sys.stderr, end='')
     return { "location": "paris" }
 
 
