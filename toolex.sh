@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 
 SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE}")")"
-ANSWER_BIN_DIR=~/wip/answer/bin
+ANSWER_DIR=~/wip/answer/
 TOOLEX_PY=~/wip/toolex/toolex.py
 
-# source "${ANSWER_BIN_DIR}/env.sh"
-source "${ANSWER_BIN_DIR}/commands/enable"
+source "${ANSWER_DIR}/bin/commands/hx-bootstrap.sh"
+hx
 
 export MODEL=$(hx model)
 
