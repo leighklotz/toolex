@@ -23,6 +23,12 @@ def get_git_branch(args: Optional[str] = "") -> Dict[str, str]:
     pass
 
 @tool("read")
+@bash_wrap("git_grep", ["git", "grep"])
+def get_git_branch(args: Optional[str] = "") -> Dict[str, str]: 
+    """`git grep`: print lines matching a pattern"""
+    pass
+
+@tool("read")
 @bash_wrap("git_log", ["git", "log"])
 def get_git_log(args: Optional[str] = "") -> Dict[str, str]: 
     """`git log`: shows commit history. Use args for limiting results."""

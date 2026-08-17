@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 
 import sys
+import os
 from typing import Dict, List, Optional, Annotated
 from tooling import tool, discover_tools
+from pathlib import Path
+
+WORKING_DIR=os.getcwd()
 
 @tool("read")
 def read_file(
@@ -18,13 +22,32 @@ def read_file(
     except Exception as e:
         return f"Error reading file: {e}"
 
-@tool("write")
+@tool("write_anywhere")
 def write_file(
     file_path: Annotated[str, "The path where the content will be written. Creates file if missing."],
     content: Annotated[str, "The full string content to write into the file."]
 ) -> str:
     """Writes text content to a file, overwriting existing content or creating new files."""
     print(f" 🤖💾{file_path}", file=sys.stderr, end='')
+    try:
+        with open(file_path, "w") as f:
+            f.write(content)
+        return "File written successfully."
+    except Exception as e:
+        return f"Error writing file: {e}"
+
+@tool("write")
+def write_file_in_workdir(
+    file_path: Annotated[str, "The path where the content will be written. Creates file if missing. Path must be inside working directory."],
+    content: Annotated[str, "The full string content to write into the file."]
+) -> str:
+    """Writes text content to a file, overwriting existing content or creating new files."""
+    print(f" 🤖💾{file_path}", file=sys.stderr, end='')
+
+    if not Path(file_path).resolve().is_relative_to(Path(WORKING_DIR).resolve()):
+        raise Exception(f"cannot write to {file_path=} as it is not inside working directory {WORKING_DIR=}")
+    
+
     try:
         with open(file_path, "w") as f:
             f.write(content)
