@@ -4,8 +4,7 @@ SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE}")")"
 ANSWER_DIR=~/wip/answer/
 TOOLEX_PY=~/wip/toolex/toolex.py
 
-source "${ANSWER_DIR}/bin/commands/hx-bootstrap.sh"
-hx core
+source "${ANSWER_DIR}/bin/commands/hx-bootstrap.sh" && hx core
 
 export MODEL=$(hx model)
 
