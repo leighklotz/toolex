@@ -140,20 +140,28 @@ def edit_file_anywhere(
         return f"Error editing {file_path=}: {e}"
 
 @tool(capabilities="read")
-def search_files_in_workdir(file_pattern: Annotated[str, "A glob pattern to match files (e.g., '*.py' or './src/*.txt'). file_pattern must be inside working dir."],
-    search_string: Annotated[str, "The literal text string you are looking for within the files."]
+def search_files_in_workdir(
+    file_pattern: Annotated[str, "A glob pattern to match files (e.g., '*.py' or './src/*.txt'). file_pattern must be inside working dir."],
+    search_string: Annotated[str, "The literal text string you are looking for within the files."],
+    case_insensitive: Annotated[bool, "If true, the search ignores case."] = False
 ) -> str:
     """Searches through multiple files matching a pattern and returns names of files containing the search string."""
-    print(f"🤖🔍'{search_string}' in '{file_pattern}'", file=sys.stderr, end='')
+    case_icon = "🔡" if case_insensitive else ""
+    print(f"🤖🔍{case_icon}'{search_string}' in '{file_pattern}'", file=sys.stderr, end='')
 
     results = []
     for file_path in glob.glob(file_pattern):
         if os.path.isfile(file_path):
             check_working_dir(file_path)
             try:
-                with open(file_path, 'r') as f:
-                    if search_string in f.read():
-                        results.append(file_path)
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    if case_insensitive:
+                        if search_string.lower() in content.lower():
+                            results.append(file_path)
+                    else:
+                        if search_string in content:
+                            results.append(file_path)
             except Exception as e:
                 print(f"Error reading file {file_path}: {e}", file=sys.stderr)
     return "\n".join(results)
@@ -161,18 +169,25 @@ def search_files_in_workdir(file_pattern: Annotated[str, "A glob pattern to matc
 @tool(capabilities="read_anywhere")
 def search_files_anywhere(
     file_pattern: Annotated[str, "A glob pattern to match files (e.g., '*.py' or './src/*.txt')."],
-    search_string: Annotated[str, "The literal text string you are looking for within the files."]
+    search_string: Annotated[str, "The literal text string you are looking for within the files."],
+    case_insensitive: Annotated[bool, "If true, the search ignores case."] = False
 ) -> str:
     """Searches through multiple files matching a pattern and returns names of files containing the search string."""
-    print(f"🤖🔍'{search_string}' in '{file_pattern}'", file=sys.stderr, end='')
+    case_icon = "🔡" if case_insensitive else ""
+    print(f"🤖🔍{case_icon}'{search_string}' in '{file_pattern}'", file=sys.stderr, end='')
 
     results = []
     for file_path in glob.glob(file_pattern):
         if os.path.isfile(file_path):
             try:
-                with open(file_path, 'r') as f:
-                    if search_string in f.read():
-                        results.append(file_path)
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    if case_insensitive:
+                        if search_string.lower() in content.lower():
+                            results.append(file_path)
+                    else:
+                        if search_string in content:
+                            results.append(file_path)
             except Exception as e:
                 print(f"Error reading file {file_path}: {e}", file=sys.stderr)
     return "\n".join(results)

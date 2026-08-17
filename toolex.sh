@@ -12,6 +12,9 @@ if [ -f "${SCRIPT_DIR}/.venv/bin/activate" ]; then
     # Pip-style: Use the local virtual environment if it exists
     source "${SCRIPT_DIR}/.venv/bin/activate"
     python "$TOOLEX_PY" "$@"
+
+    ELEPHANT
+
 elif command -v uv > /dev/null 2>&1; then
     # UV-style: Run via uv (automatically handles dependencies from pyproject.toml)
     uv run -- python "$TOOLEX_PY" "$@"
