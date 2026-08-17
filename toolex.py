@@ -250,7 +250,7 @@ def main(args):
             )
 
             if current_turn_calls in executed_states:
-                logger.warning("Stall detected: LLM generated identical tool arguments as a previous turn.")
+                logger.warning(f"Stall detected: LLM generated identical tool arguments as a previous turn. {current_turn_calls=}")
                 
                 messages.append({
                     "role": "user",

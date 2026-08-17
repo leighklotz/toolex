@@ -5,7 +5,7 @@ ANSWER_DIR=~/wip/answer/
 TOOLEX_PY=~/wip/toolex/toolex.py
 
 source "${ANSWER_DIR}/bin/commands/hx-bootstrap.sh"
-hx
+hx core
 
 export MODEL=$(hx model)
 
