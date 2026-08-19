@@ -1,8 +1,8 @@
 # Beyond Pipes: Adding Capabilities to Command-Line Language Models
 
-In the previous article, we treated language models as command-line filters operating within a POSIX shell environment.
+In the previous article we treated language models as command-line filters operating within a POSIX shell environment.
 
-That model turns out to be surprisingly powerful. Many development tasks can be expressed naturally as transformations over text streams:
+That model remains surprisingly powerful in 2026. Many development tasks can still be expressed naturally as transformations over text streams:
 
 ```bash
 history | tail -40 | help summarize what I accomplished today
@@ -13,7 +13,7 @@ lx *.py | help look for dead code
 ```
 
 ```bash
-help write a python script | unfence python | python
+help write a python script to ... | unfence python | python
 ```
 
 In each case, the model consumes text, emits text, and remains confined to standard input and standard output.
@@ -84,7 +84,7 @@ The model determines that additional information is required, requests the appro
 
 From the user's perspective, the interaction remains conversational:
 
-```text
+```
 🤖 git branch --no-merged main
 ```
 
@@ -106,6 +106,10 @@ ask "Find the largest directories consuming disk space" \
 
 The model gains the ability to inspect selected portions of the local environment without receiving unrestricted access to the system as a whole.
 
+As of May 2026 `toolex` is built around decorator-driven discovery via `tooling.discover_tools`. Functions marked with `@tool(capabilities)` are exposed automatically on import, and OpenAI-compatible schemas are derived from docstrings and `Annotated` type hints. Stall detection is active: identical `(name,arguments)` tuples are tracked in `executed_states` and a warning is injected if the model repeats them.
+
+Production use has surfaced implementation details that affect how capabilities should be described. The original `git_tools.py` shipped with duplicate function names — e.g. `get_git_branch` defined twice for `git branch` and `git grep`, and `do_git_checkout` defined twice for `checkout` and `commit`. The second definition wins silently, so the tool surface was incomplete until naming was made unique. That class of bug is now part of the module review checklist.
+
 ## Preserving the Pipeline Model
 
 An important design constraint of `toolex` is that it does not replace `answer` or introduce a parallel execution model.
@@ -120,6 +124,8 @@ The conversation remains a stream flowing through standard input and output. Too
 * inspectability.
 
 Unlike many agent systems, there is no hidden daemon maintaining internal state and no long-running process accumulating context in the background. The conversation itself remains the state, and the shell remains responsible for orchestration.
+
+The magic header `Content-Type: application/x-llm-history+json` continues to be the transport boundary between `ask`/`help`, `toolex`, and `answer`. Cache hits are shown as 🎯, misses as ✨, with additional emojis for piped content, `bx` shell input and `lx` file input.
 
 ## Explicit Capabilities and Explicit Trust
 
@@ -141,15 +147,22 @@ The model may invoke `git status` and `git diff`, generate a conventional commit
 
 Execution, however, remains subject to an explicit approval step:
 
-```text
-🤖 Found targeted block (bash). Proceed? (y/N)
+```
+🧖 Found targeted block (bash). Proceed? (y/N)
 ```
 
 The command does not execute until the operator confirms it.
 
-This distinction is intentional. The model may propose actions, inspect state, and prepare commands, but authority to perform side effects remains outside the model and inside the shell pipeline itself.
+## Trust Caveats
 
-The result behaves much more like a traditional shell utility than a virtual employee operating inside a sandboxed workstation.
+Current conditions add nuance to this trust model. The permission system is capability-based and enforced via `required.issubset(user_perms)`. It is logical, not OS-enforced: a `read`-capable tool such as `get_cat` can still read any path the user process can read, e.g. `/etc/shadow`. Bash tools in `bash_tools.py` are wrapped with `@bash_wrap` and run directly on the host via `subprocess.run`; the Podman sandbox code exists but is not used by default.
+
+Other operational issues:
+
+* Temp handling in `answer`: `_mktemp_reg` falls back to `mktemp -u`, a TOCTOU race. Cleanup via `trap '_cleanup_run_dir'` is PID-guarded but subshells can leak.
+* No request timeouts on `requests.post` or `curl` in the current release, allowing long hangs.
+* Caching is request-hash based with no TTL/eviction and permissions of existing cache files are never checked.
+* Error handling is inconsistent across tools; some return error strings, others raise.
 
 ## Conclusion
 
@@ -159,4 +172,6 @@ The original `answer` model treated language models as composable filters connec
 
 The resulting architecture allows the model to observe selected portions of the local environment while preserving operator control over actions that affect that environment.
 
-The next article examines the implementation itself: how ordinary Python functions become model-callable tools, how permissions are enforced, and how tool calls are represented and transported through the same pipeline architecture used by `answer`.
+In 2026 the toolchain is still intentionally boring: tools are ordinary functions with semantic metadata, permissions are granular and namespaced, errors are conversational feedback for self-correction, and the shell remains the orchestrator. The work now is to keep that simplicity while closing the implementation gaps that real use has exposed.
+
+The next article examines the implementation itself: how ordinary Python functions become model-callable tools, how permissions are enforced in practice, and how tool calls are represented and transported through the same pipeline architecture used by `answer`.
