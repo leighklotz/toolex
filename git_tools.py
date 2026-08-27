@@ -24,7 +24,7 @@ def get_git_branch(args: Optional[str] = "") -> Dict[str, str]:
 
 @tool("read")
 @bash_wrap("git_grep", ["git", "grep"])
-def get_git_branch(args: Optional[str] = "") -> Dict[str, str]: 
+def get_git_grep(args: Optional[str] = "") -> Dict[str, str]: 
     """`git grep`: print lines matching a pattern"""
     pass
 
@@ -34,7 +34,7 @@ def get_git_log(args: Optional[str] = "") -> Dict[str, str]:
     """`git log`: shows commit history. Use args for limiting results."""
     pass
 
-# --- ADVANCED QUERY TOOL (The Fix) ---
+# --- MULTI-TOOL ---
 
 @tool("read")
 @bash_wrap("git_query", ["git"])
@@ -82,7 +82,7 @@ def do_git_checkout(args: Optional[str] = "") -> Dict[str, str]:
 
 @tool("write")
 @bash_wrap("git_commit", ["git", "commit"])
-def do_git_checkout(args: Optional[str] = "") -> Dict[str, str]: 
+def do_git_commit(args: Optional[str] = "") -> Dict[str, str]: 
     """`git commit`: adds changes to local repository."""
     pass
 
