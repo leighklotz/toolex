@@ -7,7 +7,7 @@ from typing import Annotated
 from pathlib import Path
 from tooling import tool, discover_tools
 
-WORKING_DIR=os.environ["TOOLEX_WORKSPACE_DIR"] or os.getcwd()
+WORKING_DIR=os.environ.get("TOOLEX_WORKSPACE_DIR", os.getcwd())
 
 def check_working_dir(file_path):
     """
