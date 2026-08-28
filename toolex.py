@@ -286,7 +286,8 @@ def main(args):
                     result = execute_tool(mod_obj, fn_name, **exec_args)
                 except Exception as e:
                     logger.error(f"Tool Error: {e}")
-                    messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps({"error": str(e})}})
+                    error_payload = json.dumps({"error": str(e)})
+                    messages.append({"role": "tool", "tool_call_id": call["id"], "content": error_payload})
                     continue
 
                 if not isinstance(result, (dict, list, str, int, float, bool)):
