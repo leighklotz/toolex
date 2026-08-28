@@ -33,7 +33,6 @@ VIA_API_CHAT_BASE = os.getenv("VIA_API_CHAT_BASE", "http://127.0.0.1:5000")
 MODEL = os.getenv("MODEL", 'gemma-4-26b-qat-batch')
 URL = f"{VIA_API_CHAT_BASE}/v1/chat/completions"
 MAGIC_HEADER = "Content-Type: application/x-llm-history+json"
-FAIL_ON_TOOL_ERROR = False
 TOOLS_INFERENCE_TIMEOUT=600
 
 def generate_openai_schema(obj):
@@ -141,10 +140,6 @@ def build_tools_from_modules(modules: List[Any], permission_map: Dict[str, Dict[
     tools = []
     for mod in modules:
         modname = mod.__name__
-        # If the module wasn't mentioned in --tools at all, we don't assume permission (Secure by default)
-        if modname not in permission_map and any(m.startswith(modname) for m in permission_map): 
-            continue # This part is tricky; let's check if the user meant this module via a prefix
-
         # We only process modules specifically requested/mentioned via CLI to avoid implicit tool leakage
         if modname not in permission_map:
             continue
@@ -165,7 +160,11 @@ def build_tools_from_modules(modules: List[Any], permission_map: Dict[str, Dict[
                     can_use = True
 
                 if can_use:
-                    tools.append(generate_openai_schema(obj))
+                    schema = generate_openai_schema(obj)
+                    pats = [p for cap in required_caps for p in user_caps.get(cap, [])]
+                    schema["function"]["description"] += f"\nAllowed file patterns for this session: {pats}"
+                    tools.append(schema)
+
     return tools
 
 def execute_tool(mod_obj, func_name, *args, **kwargs):
@@ -299,7 +298,7 @@ def main(args):
 
                     result = execute_tool(mod_obj, fn_name, **exec_args)
                 except Exception as e:
-                    logger.error(f"Tool Error: {e}")
+                    logger.warning(f"Tool Error: {e}")
                     error_payload = json.dumps({"error": str(e)})
                     messages.append({"role": "tool", "tool_call_id": call["id"], "content": error_payload})
                     continue
@@ -314,7 +313,7 @@ def main(args):
         else:
             # Final Response
             messages.append(choice["message"])
-            print(MAGIC_HEADER); print(json.dumps(messages)); break
+            print(MAGIC_HEADER); print(json.dumps(messages, default=str)); break
 
     if sys.stderr.isatty():
         sys.stderr.write("✨")
