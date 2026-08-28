@@ -116,6 +116,21 @@ echo no changes
 | `--tools <module[:perm]...` | List of tools and permissions available to the LLM. Supports multiple permissions per module using colons (e.g., `git:read:write`). | None |
 | `--workspace-dir <path>` | Sets the working directory for podbash tools | Current dir / `$TOOLEX_WORKSPACE_DIR` |
 
+### Fine-Grained Permissions
+You can restrict LLM tools using `module:capability=pattern`. 
+
+**Syntax Rules:**
+*   **Multiple rules per command:** Use commas to separate different capability assignments.
+    *   `--tools file:read=README.md,file:write=log.txt` (Correct)
+*   **One rule with multiple files:** Do **not** use commas for filenames. Instead, use shell globbing or provide the flag multiple times. This prevents ambiguity.
+
+| Intent | Correct Syntax | Why? |
+| :--- | :--- | :--- |
+| **Specific Files** | `file:read=README.md file:write=log.txt` | Separate flags for separate rules. |
+| **All Python files**| `file:read=*.py` | Use a glob pattern within the rule. |
+| **Multiple patterns**| `--tools file:read=a.txt --tools file:read=b.txt` | Repeat the flag to add more items. |
+
+
 ## Extending the system
 
 * **Add a new module** – put a `.py` file with one or more `@tool` functions.
