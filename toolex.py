@@ -93,12 +93,17 @@ def generate_openai_schema(obj):
 
 def parse_permissions(args_list: List[str]) -> Dict[str, Dict[str, List[str]]]:
     """
-    weather           -> {'weather_tools': {'all': ['*']}}
-    git:read          -> {'git_tools': {'read': ['*']}}
-    git:read:write    -> {'git_tools': {'read': ['*'], 'write': ['*']}}
-    file:read=*.py    -> {'file_tools': {'read': ['*.py']}}
+    weather                        -> {'weather_tools': {'all': ['*']}}
+    git:read                       -> {'git_tools': {'read': ['*']}}
+    git:read:write                 -> {'git_tools': {'read': ['*'], 'write': ['*']}}
+    file:read=*.py                 -> {'file_tools': {'read': ['*.py']}}
+    file:read=README.md,doc/*.md   -> {'file_tools': {'read': ['README.md', 'doc/*.md']}}
     """
     mapping: Dict[str, Dict[str, List[str]]] = {}
+    # (modkey, cap) of the last "mod:cap=pattern" item; lets a subsequent comma- or
+    # argument-separated bare glob continue that pattern list instead of being
+    # misread as a module name.
+    last_spec = None
 
     def modkey(name: str) -> str:
         return name if name.endswith("_tools") else f"{name}_tools"
@@ -112,15 +117,23 @@ def parse_permissions(args_list: List[str]) -> Dict[str, Dict[str, List[str]]]:
                 if "=" in item:
                     prefix, pattern = item.split("=", 1)
                     base, cap = prefix.split(":", 1)
-                    mapping.setdefault(modkey(base), {}).setdefault(cap, []).append(pattern.strip())
+                    last_spec = (modkey(base), cap)
+                    mapping.setdefault(last_spec[0], {}).setdefault(cap, []).append(pattern.strip())
                 elif ":" in item:
                     parts = item.split(":")
                     for cap in parts[1:]:
                         mapping.setdefault(modkey(parts[0]), {}).setdefault(cap, []).append("*")
+                    last_spec = None
+                elif last_spec and any(c in item for c in "*?[/"):
+                    # continuation of the previous pattern list:
+                    # file:read=README.md,doc/*.md  (was previously parsed as module "doc/*.md")
+                    mapping[last_spec[0]][last_spec[1]].append(item)
                 else:
                     mapping[modkey(item)] = {"all": ["*"]}   # bare name = full access
+                    last_spec = None
             except ValueError:
                 logger.warning("Ignoring malformed --tools entry: %r", item)
+                last_spec = None
     return mapping
 
 def build_tools_from_modules(modules: List[Any], permission_map: Dict[str, Dict[str, List[str]]]):
@@ -262,17 +275,21 @@ def main(args):
                             if rc in permission_map.get(modname, {}):
                                 allowed_patterns_for_this_call.extend(permission_map[modname][rc])
 
-                    # Validate all string arguments against the intersection of allowed patterns for this call's requirements
-                    # If user provided specific path globs (e.g., *.py), check them here.
-                    if "*" not in allowed_patterns_for_this_call and any(p != "*" for p in allowed_patterns_for_this_call):
-                        filtered_args = {}
+                    # HARDENING (recommended, deletable): a tool whose required capability was
+                    # never granted (e.g. the model hallucinating 'read_file_anywhere' under
+                    # 'file:read') previously slipped through here with NO path checks at all.
+                    if not allowed_patterns_for_this_call:
+                        raise ValueError(f"Access Denied: tool '{fn_name}' requires capabilities {sorted(req_caps)} not granted for module '{modname}'")
+
+                    # Validate only path-like string arguments against the allowed patterns.
+                    # Other string arguments (search_string, content, ...) are not file references
+                    # and must not be checked against file globs.
+                    if "*" not in allowed_patterns_for_this_call:
+                        pathish = ("path", "pattern", "file", "dir")
                         for k, v in kwargs.items():
-                            # Only validate string arguments that look like paths (or just all strings)
-                            if isinstance(v, str):
+                            if isinstance(v, str) and any(h in k.lower() for h in pathish):
                                 if not any(fnmatch.fnmatch(v, p) for p in allowed_patterns_for_this_call):
                                     raise ValueError(f"Access Denied: Argument '{k}' with value '{v}' does not match permitted patterns {allowed_patterns_for_this_call}")
-                            filtered_args[k] = v
-                        kwargs = filtered_args
 
                     # Final execution call (with arg filtering to prevent TypeError)
                     actual_keys = [p.name for p in sig.parameters.values() if not any(isinstance(p, inspect.Parameter.VAR_KEYWORD) for _ in [])]
