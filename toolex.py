@@ -34,6 +34,7 @@ MODEL = os.getenv("MODEL", 'gemma-4-26b-qat-batch')
 URL = f"{VIA_API_CHAT_BASE}/v1/chat/completions"
 MAGIC_HEADER = "Content-Type: application/x-llm-history+json"
 FAIL_ON_TOOL_ERROR = False
+TOOLS_INFERENCE_TIMEOUT=600
 
 def generate_openai_schema(obj):
     """Generates an OpenAI tool schema using Strategic Docstrings and Annotated metadata."""
@@ -92,48 +93,34 @@ def generate_openai_schema(obj):
 
 def parse_permissions(args_list: List[str]) -> Dict[str, Dict[str, List[str]]]:
     """
-    Converts ['git', 'file:read=*.py'] into a detailed restriction map.
-    Handles multiple arguments and comma-separated rules.
-    Format: { module_name: { capability: [patterns] } }
-    Example output: {'file_tools': {'read': ['*.py']}}
+    weather           -> {'weather_tools': {'all': ['*']}}
+    git:read          -> {'git_tools': {'read': ['*']}}
+    git:read:write    -> {'git_tools': {'read': ['*'], 'write': ['*']}}
+    file:read=*.py    -> {'file_tools': {'read': ['*.py']}}
     """
-    mapping = {}
+    mapping: Dict[str, Dict[str, List[str]]] = {}
 
-    # Step 1: Flatten all inputs into individual "rules" using commas as the separator.
-    # This ensures '--tools file:read=A,file:write=B' becomes two distinct rules.
-    all_rule_strings = []
+    def modkey(name: str) -> str:
+        return name if name.endswith("_tools") else f"{name}_tools"
+
     for arg in args_list:
-        all_rule_strings.extend(arg.split(','))
-
-    for item in all_rule_strings:
-        item = item.strip()
-        if not item or ":" not in item or "=" not in item:
-            continue  # Skip empty strings or non-permission rules (like 'git')
-
-        try:
-            # Step 2: Split into [prefix, pattern] only once.
-            # We split by '=' only ONCE to ensure the pattern can contain characters like ':' if needed.
-            prefix, pattern = item.split("=", 1)
-            modname_base, cap = prefix.split(":", 1)
-            
-            modname = f"{modname_base}_tools"
-            pattern = pattern.strip()
-
-            # Step 3: Add to mapping. 
-            # We treat the 'rest' as a single string (the pattern). 
-            # If they want multiple files, they should use globbing (*.py) or repeat the flag.
-            if modname not in mapping:
-                mapping[modname] = {}
-            
-            if cap not in mapping[modname]:
-                mapping[modname][cap] = []
-                
-            mapping[modname][cap].append(pattern)
-
-        except ValueError:
-            # This handles cases where the split fails (e.g., malformed 'module:cap')
-            continue
-
+        for item in arg.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            try:
+                if "=" in item:
+                    prefix, pattern = item.split("=", 1)
+                    base, cap = prefix.split(":", 1)
+                    mapping.setdefault(modkey(base), {}).setdefault(cap, []).append(pattern.strip())
+                elif ":" in item:
+                    parts = item.split(":")
+                    for cap in parts[1:]:
+                        mapping.setdefault(modkey(parts[0]), {}).setdefault(cap, []).append("*")
+                else:
+                    mapping[modkey(item)] = {"all": ["*"]}   # bare name = full access
+            except ValueError:
+                logger.warning("Ignoring malformed --tools entry: %r", item)
     return mapping
 
 def build_tools_from_modules(modules: List[Any], permission_map: Dict[str, Dict[str, List[str]]]):
@@ -195,22 +182,29 @@ def main(args):
         except Exception as e: logger.error(f"JSON error: {e}")
 
     # 1. Parse the complex restriction map (The "Single Source of Truth")
-    permission_map = parse_permissions(args.tools) 
-    MODS_LIST = []
-    TOOL_EXECUTION_MAP = {} 
+    permission_map = parse_permissions(args.tools)
+    logger.debug("permission map: %s", permission_map)
 
-    for modname in permission_map.keys():
+    MODS_LIST, TOOL_EXECUTION_MAP = [], {}
+
+    for modname in permission_map:
         try:
             mod = importlib.import_module(modname)
-            MODS_LIST.append(mod)
-            for name, obj in inspect.getmembers(mod, inspect.isfunction):
-                if getattr(obj, "_is_toolex_tool", False):
-                    TOOL_EXECUTION_MAP[name] = mod
         except ImportError:
-            logger.error(f"Module {modname} not found.")
+            logger.error("Module %s not found.", modname)
+            continue
+        MODS_LIST.append(mod)
+        for name, obj in inspect.getmembers(mod, inspect.isfunction):
+            if getattr(obj, "_is_toolex_tool", False):
+                TOOL_EXECUTION_MAP[name] = mod
 
-    # 2. Build tools using the map (Filtering based on capabilities)
     TOOLS = build_tools_from_modules(MODS_LIST, permission_map)
+    logger.debug("exposing %d tools: %s", len(TOOLS), [t["function"]["name"] for t in TOOLS])
+
+    if args.tools and not TOOLS:
+        logger.error("No tools resolved from --tools %s; refusing to run.", args.tools)
+        sys.exit(2)
+
     executed_states = set()
 
     for _ in range(args.total_iterations):
@@ -218,7 +212,10 @@ def main(args):
             print(MAGIC_HEADER); print(json.dumps(messages, default=str)); break
 
         try:
-            response = requests.post(URL, json={"model": MODEL, "messages": messages, "tools": TOOLS}, timeout=60).json()
+            payload = {"model": MODEL, "messages": messages}
+            if TOOLS:
+                payload["tools"] = TOOLS
+            response = requests.post(URL, json=payload, timeout=TOOLS_INFERENCE_TIMEOUT).json()
             if "choices" not in response or not response["choices"]: break
         except Exception as e:
             logger.error(f"API Error: {e}"); break
@@ -236,8 +233,8 @@ def main(args):
 
             # Append assistant message to history (including reasoning if present)
             history_entry = {
-                "role": "assistant", 
-                "content": assistant_msg.get("content"), 
+                "role": "assistant",
+                "content": assistant_msg.get("content"),
                 "tool_calls": assistant_msg.get("tool_calls") or []
             }
             if not args.drop_tool_reasoning and "reasoning_content" in assistant_msg:
@@ -278,7 +275,7 @@ def main(args):
                         kwargs = filtered_args
 
                     # Final execution call (with arg filtering to prevent TypeError)
-                    actual_keys = [p.name for p in sig.parameters.values() if not any(isinstance(p, inspect.Parameter.VAR_KEYWORD) for _ in [])] 
+                    actual_keys = [p.name for p in sig.parameters.values() if not any(isinstance(p, inspect.Parameter.VAR_KEYWORD) for _ in [])]
                     # Simple param check: only pass keys present in signature or allow **kwargs logic as before
                     has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
                     exec_args = kwargs if has_var_kw else {k: v for k, v in kwargs.items() if k in sig.parameters}
@@ -293,8 +290,8 @@ def main(args):
                 if not isinstance(result, (dict, list, str, int, float, bool)):
                     result = {"result": str(result)}
                 messages.append({
-                    "role": "tool", 
-                    "tool_call_id": call["id"], 
+                    "role": "tool",
+                    "tool_call_id": call["id"],
                     "content": json.dumps(result, default=str)
                 })
         else:
@@ -302,7 +299,7 @@ def main(args):
             messages.append(choice["message"])
             print(MAGIC_HEADER); print(json.dumps(messages)); break
 
-    if sys.stderr.isatty(): 
+    if sys.stderr.isatty():
         sys.stderr.write("✨")
         sys.stderr.flush()
 
@@ -310,13 +307,16 @@ __all__ = ["execute_tool", "main"]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tools", nargs="+", default=[], help="e.g., git file:read=*.py")
+    parser.add_argument("--tools", action="append", nargs="+", default=[], help="e.g., git file:read=*.py", metavar="SPEC")
     parser.add_argument("--log-level", type=str, choices=["DEBUG","INFO","WARNING","ERROR"], default="INFO")
     parser.add_argument("--workspace-dir", type=str, default=None)
     parser.add_argument("--drop-tool-reasoning", action="store_true")
     parser.add_argument("--total-iterations", type=int, default=30)
     args = parser.parse_args()
+    args.tools = [spec for group in args.tools for spec in group]
 
-    try: main(args)
-    except KeyboardInterrupt: sys.exit(1)
+    try:
+        main(args)
+    except KeyboardInterrupt:
+        sys.exit(1)
 
