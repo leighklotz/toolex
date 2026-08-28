@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+import fnmatch
+import functools
+import json
+
 import sys
 import os
 import glob
@@ -23,6 +27,44 @@ def check_working_dir(file_path):
     if not Path(file_path).resolve().is_relative_to(Path(WORKING_DIR).resolve()):
         raise Exception(f"cannot access {file_path=} as it is not inside working directory {WORKING_DIR=}")
 
+
+def check_permitted_path(file_path, contain=True):
+    """
+    Combined containment + grant-pattern check for any path a tool is about to open.
+
+    Patterns come from toolex via TOOLEX_PERMITTED_PATH_PATTERNS (a JSON list of
+    glob patterns granted on the command line, e.g. file:read=README.md,doc/*.md).
+    Missing or empty env var => no pattern constraint (containment still applies
+    when contain=True). Raises PermissionError on violation, naming the allowed
+    patterns so the LLM can self-correct.
+    """
+    if contain:
+        check_working_dir(file_path)
+
+    raw = os.environ.get("TOOLEX_PERMITTED_PATH_PATTERNS")
+    if not raw:
+        return
+
+    permitted = json.loads(raw)  # toolex always writes valid JSON
+
+    path = Path(file_path).resolve()
+    workdir = Path(WORKING_DIR).resolve()
+    try:
+        rel = path.relative_to(workdir).as_posix()
+    except ValueError:
+        rel = None
+
+    candidates = [c for c in (rel, path.as_posix(), os.path.normpath(file_path)) if c]
+    for candidate in candidates:
+        if any(fnmatch.fnmatchcase(candidate, pattern) for pattern in permitted):
+            return
+
+    raise PermissionError(
+        f"Access Denied: {file_path!r} resolves to {path.as_posix()!r} which does not "
+        f"match permitted patterns {sorted(permitted)}"
+    )
+
+
 def _read_file_impl(file_path):
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -45,7 +87,13 @@ def _search_files_impl(file_pattern, search_string, case_insensitive, check_fn=N
     for file_path in glob.glob(file_pattern):
         if os.path.isfile(file_path):
             if check_fn:
-                check_fn(file_path)
+                try:
+                    check_fn(file_path)
+                except Exception as e:
+                    # Not permitted / outside workdir: skip this file rather than
+                    # aborting the whole exploratory search.
+                    print(f"Skipping {file_path}: {e}", file=sys.stderr)
+                    continue
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
@@ -73,7 +121,7 @@ def read_file_in_workdir(
 ) -> str:
     """Returns the contents of a text file as a single string."""
     print(f"🤖📥{file_path}", file=sys.stderr, end='')
-    check_working_dir(file_path)
+    check_permitted_path(file_path)
     return _read_file_impl(file_path)
 
 @tool("read_anywhere")
@@ -82,6 +130,7 @@ def read_file_anywhere(
 ) -> str:
     """Returns the contents of a text file as a single string."""
     print(f"🤖📥{file_path}", file=sys.stderr, end='')
+    check_permitted_path(file_path, contain=False)
     return _read_file_impl(file_path)
 
 @tool("write_anywhere")
@@ -91,6 +140,7 @@ def write_file_anywhere(
 ) -> str:
     """Writes text content to a file, overwriting existing content or creating new files."""
     print(f"🤖💾{file_path}", file=sys.stderr, end='')
+    check_permitted_path(file_path, contain=False)
     return _write_file_impl(file_path, content)
 
 @tool(capabilities="write")
@@ -100,7 +150,7 @@ def write_file_in_workdir(
 ) -> str:
     """Writes text content to a file, overwriting existing content or creating new files."""
     print(f"🤖💾{file_path}", file=sys.stderr, end='')
-    check_working_dir(file_path)
+    check_permitted_path(file_path)
     return _write_file_impl(file_path, content)
 
 @tool(capabilities="edit")
@@ -110,9 +160,8 @@ def edit_file_in_workdir(
 ) -> str:
     """Applies a specific text substitution to an existing file. Requires precise formatting."""
     print(f"🤖📝✒️ {file_path}", file=sys.stderr, end='')
-    check_working_dir(file_path)
+    check_permitted_path(file_path)
     try:
-        # Re-using logic from the user prompt but ensuring it's contained in this module context
         if "replace:" not in edit_instructions:
             return "Error: Invalid edit instructions. You must use the format 'replace:old_string:new_string'"
         parts = edit_instructions.split(":", 2)
@@ -133,8 +182,8 @@ def edit_file_anywhere(
 ) -> str:
     """Applies a specific text substitution to an existing file. Requires precise formatting."""
     print(f"🤖📝✒️ {file_path}", file=sys.stderr, end='')
+    check_permitted_path(file_path, contain=False)
     try:
-        # Re-using logic from the user prompt but ensuring it's contained in this module context
         if not "replace:" in edit_instructions:
             return f"Error: Invalid edit instructions for {file_path=}. You must use the format 'replace:old_string:new_string'"
         parts = edit_instructions.split(":", 2)
@@ -155,7 +204,7 @@ def search_files_in_workdir(
     """Searches through multiple files matching a pattern and returns names of files containing the search string."""
     case_icon = "🔡" if case_insensitive else ""
     print(f"🤖🔍{case_icon}'{search_string}' in '{file_pattern}'", file=sys.stderr, end='')
-    return _search_files_impl(file_pattern, search_string, case_insensitive, check_fn=check_working_dir)
+    return _search_files_impl(file_pattern, search_string, case_insensitive, check_fn=check_permitted_path)
 
 @tool(capabilities="read_anywhere")
 def search_files_anywhere(
@@ -166,7 +215,23 @@ def search_files_anywhere(
     """Searches through multiple files matching a pattern and returns names of files containing the search string."""
     case_icon = "🔡" if case_insensitive else ""
     print(f"🤖🔍{case_icon}'{search_string}' in '{file_pattern}'", file=sys.stderr, end='')
-    return _search_files_impl(file_pattern, search_string, case_insensitive, check_fn=None)
+    return _search_files_impl(file_pattern, search_string, case_insensitive,
+                              check_fn=functools.partial(check_permitted_path, contain=False))
+@tool(capabilities="read")
+def read_files_in_workdir(
+    file_pattern: Annotated[str, "A glob pattern selecting the files to read, relative or absolute, e.g. 'README.md', 'doc/*.md', '*.py'. Every matched file must be inside the working dir and match the permitted path patterns."]
+) -> str:
+    """Reads all files matching a glob pattern and returns their contents, each
+    preceded by a '===== <path> =====' header line."""
+    print(f"🤖📥📚{file_pattern}", file=sys.stderr, end='')
+    matched = sorted(glob.glob(file_pattern))
+    if not matched:
+        return f"Error: no files match pattern {file_pattern!r}"
+    chunks = []
+    for fp in matched:
+        check_permitted_path(fp)
+        chunks.append(f"===== {fp} =====\n{_read_file_impl(fp)}")
+    return "\n\n".join(chunks)
 
 
 ### File must end with this line

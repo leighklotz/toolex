@@ -92,22 +92,55 @@ def generate_openai_schema(obj):
         },
     }
 
-def build_tools_from_modules(modules: List[Any], permission_map: Dict[str, set]):
-    """Filters tools based on requested permissions."""
+def build_tools_from_modules(modules: List[Any], permission_map: Dict[str, dict]):
+    """Filters tools based on requested permissions and injects path constraints
+    from 'module:capability=glob' grants into the schema descriptions."""
     tools = []
     for mod in modules:
         modname = mod.__name__
-        granted_perms = permission_map.get(modname, {"read"}) 
+        spec = permission_map.get(modname, {})
+        granted_caps = spec.get("caps", set())
+        patterns = sorted({p for plist in spec.get("patterns", {}).values() for p in plist})
 
         for name, obj in inspect.getmembers(mod, inspect.isfunction):
             if getattr(obj, "_is_toolex_tool", False):
                 required = getattr(obj, "_required_caps", {"read"})
-                user_perms = permission_map.get(modname, set())
-
                 # Allow if user has 'all' OR the tool's requirement is a subset of what was granted
-                if "all" in user_perms or required.issubset(user_perms):
-                    tools.append(generate_openai_schema(obj))
+                if "all" in granted_caps or required.issubset(granted_caps):
+                    schema = generate_openai_schema(obj)
+                    if patterns:
+                        constraint = (
+                            " You may only access paths matching these glob patterns "
+                            f"(relative to the working directory): {', '.join(patterns)}."
+                        )
+                        schema["function"]["description"] += constraint
+                        for prop in schema["function"]["parameters"]["properties"].values():
+                            prop["description"] += constraint
+                    tools.append(schema)
     return tools
+
+def set_permitted_patterns_env(permission_map: Dict[str, dict], modname: str, required_caps) -> None:
+    """
+    Export the path constraints that apply to the tool about to run as
+    TOOLEX_PERMITTED_PATH_PATTERNS (JSON list of glob patterns relative to the
+    workspace). Tool modules that enforce per-file access (file_tools.py) read
+    this. Unconstrained grants unset the variable.
+    """
+    spec = permission_map.get(modname) or {}
+    granted = spec.get("caps", set())
+    patterns_map = spec.get("patterns", {})
+    caps = required_caps if isinstance(required_caps, (set, list)) else {required_caps}
+
+    patterns: List[str] = []
+    if "all" not in granted:
+        for cap in caps:
+            patterns.extend(patterns_map.get(cap, []))
+
+    if patterns:
+        os.environ["TOOLEX_PERMITTED_PATH_PATTERNS"] = json.dumps(sorted(set(patterns)))
+    else:
+        os.environ.pop("TOOLEX_PERMITTED_PATH_PATTERNS", None)
+
 
 def execute_tool(tool_module_obj, tool_func_name: str, *args, **kwargs):
     """Execute a registered tool by name from its module."""
@@ -134,19 +167,29 @@ def find_module_for_func(mod_registry: Dict[str, Any], func_name: str):
 
 def parse_permissions(args_list):
     """
-    Converts ['foo', 'foo:read', 'foo:read:write'] into:
-    { 'foo_tools': {'read'}, 'foo_tools': {'read', 'write'} }
-    Handles multiple permissions separated by colons after the module name.
+    Converts CLI tool specs into a permission map.
+
+    Supported spec forms (specs for the same module are merged):
+        mod                     grant 'read' (default), unconstrained
+        mod:cap                 grant capability `cap`, unconstrained
+        mod:cap=pat[,pat...]    grant capability `cap` limited to the given glob
+                                patterns (relative to the workspace; no colons in patterns)
+        mod:read=a.md:write     several capability specs after one module name
+        mod:all                 grant every capability the module defines, unconstrained
+
+    Returns:
+        { 'file_tools': {
+              'caps': {'read'},                     # granted capabilities
+              'patterns': {'read': ['README.md']},  # only for constrained caps
+          } }
     """
     mapping = {}
+
     for item in args_list:
-        # Split on first colon to separate module name from permissions
         if ":" in item:
-            base_name, *perm_list = item.split(":")
-            requested_perms = set(perm_list)
+            base_name, *cap_specs = item.split(":")
         else:
-            base_name = item
-            requested_perms = {"read"}
+            base_name, cap_specs = item, []
 
         modname = f"{base_name}_tools"
 
@@ -155,26 +198,52 @@ def parse_permissions(args_list):
             if spec is None:
                 logger.error(f"Tool module '{modname}' does not exist")
                 sys.exit(1)
-            mapping[modname] = set()
+            module = importlib.import_module(modname)
+            valid_perms = set()
+            for name, obj in inspect.getmembers(module, inspect.isfunction):
+                if getattr(obj, "_is_toolex_tool", False):
+                    caps = getattr(obj, "_required_caps", {"read"})
+                    valid_perms.update(caps if isinstance(caps, (set, list)) else {caps})
+            mapping[modname] = {"caps": set(), "patterns": {}, "valid": valid_perms}
 
-        module = importlib.import_module(modname)
-        valid_perms = set()
-        for name, obj in inspect.getmembers(module, inspect.isfunction):
-            if getattr(obj, "_is_toolex_tool", False):
-                caps = getattr(obj, "_required_caps", {"read"})
-                valid_perms.update(caps if isinstance(caps, (set, list)) else {caps})
+        entry = mapping[modname]
 
-        # Handle 'all' permission (takes precedence if present)
-        if "all" in requested_perms:
-            mapping[modname].add("all")
-        else:
-            for p in requested_perms:
-                if p in valid_perms:
-                    mapping[modname].add(p)
-                else:
-                    logger.error(f"Permission '{p}' does not exist for tool {base_name}")
+        if not cap_specs:
+            # Bare module name keeps the historical default: unconstrained 'read'.
+            if "read" not in entry["valid"]:
+                logger.error(f"Permission 'read' does not exist for tool {base_name}")
+                sys.exit(1)
+            entry["caps"].add("read")
+            continue
+
+        for cap_spec in cap_specs:
+            if "=" in cap_spec:
+                cap, _, pattern_str = cap_spec.partition("=")
+                patterns = [p for p in pattern_str.split(",") if p]
+                if not patterns:
+                    logger.error(f"Permission '{cap_spec}' has '=' but no patterns")
                     sys.exit(1)
+            else:
+                cap, patterns = cap_spec, None
+
+            if cap == "all":
+                if patterns is not None:
+                    logger.warning(f"'all' ignores pattern constraints in '{cap_spec}'")
+                entry["caps"] |= entry["valid"]
+                continue
+
+            if cap not in entry["valid"]:
+                logger.error(f"Permission '{cap}' does not exist for tool {base_name}")
+                sys.exit(1)
+
+            entry["caps"].add(cap)
+            if patterns is not None:
+                entry["patterns"].setdefault(cap, []).extend(patterns)
+
+    for entry in mapping.values():
+        entry.pop("valid", None)
     return mapping
+
 
 def main(args):
     # Set logging level from argument
@@ -197,8 +266,12 @@ def main(args):
         except Exception as e:
             logger.error(f"Failed to parse JSON from stdin: {e}")
 
+    # --tools may be repeated and each occurrence carries one or more specs;
+    # flatten [[a, b], [c]] -> [a, b, c]
+    tools_list = [spec for group in args.tools for spec in group]
+
     # Permission mapping and module loading logic
-    permission_map = parse_permissions(args.tools) 
+    permission_map = parse_permissions(tools_list)
     MODS_LIST = []
     TOOL_EXECUTION_MAP = {} # Map function name -> module object for fast lookup during loop
 
@@ -251,12 +324,12 @@ def main(args):
 
             if current_turn_calls in executed_states:
                 logger.warning(f"Stall detected: LLM generated identical tool arguments as a previous turn. {current_turn_calls=}")
-                
+
                 messages.append({
                     "role": "user",
                     "content": "[System Error: Infinite execution loop terminated. You are passing identical parameters back to the same tool. Abandon this loop and summarize your progress immediately.]"
                 })
-                
+
                 try:
                     _ui_status("✨")
                     final_resp = requests.post(URL, json={"model": MODEL, "messages": messages}).json()
@@ -264,11 +337,11 @@ def main(args):
                         messages.append(final_resp["choices"][0]["message"])
                 except Exception as e:
                     logger.error(f"Failed to fetch graceful loop exit response: {e}")
-                    
+
                 print(MAGIC_HEADER)
                 print(json.dumps(messages, default=str))
                 break
-                
+
             executed_states.add(current_turn_calls)
 
             # Build the message to append back into history
@@ -290,20 +363,27 @@ def main(args):
                 name, arguments = fn["name"], json.loads(fn["arguments"])
 
                 try:
-                    #Get the module that contains this function
+                    # Get the module that contains this function
                     mod_obj = find_module_for_func(TOOL_EXECUTION_MAP, name)
-                    
+
                     # Get the actual function object from that module
                     tool_func = getattr(mod_obj, name)
-                    
+
+                    # Export this tool's path constraints (may unset the env var)
+                    set_permitted_patterns_env(
+                        permission_map,
+                        mod_obj.__name__,
+                        getattr(tool_func, "_required_caps", {"read"}),
+                    )
+
                     # Use inspect to get the signature of the tool function
                     sig = inspect.signature(tool_func)
-                    
+
                     # Check if the function accepts **kwargs (VAR_KEYWORD)
                     has_var_keyword = any(param.kind == inspect.Parameter.VAR_KEYWORD for param in sig.parameters.values())
 
                     if has_var_keyword:
-                        
+
                         # If it accepts **kwargs, we don't filter; all provided kwargs are valid
                         filtered_args = arguments
                     else:
