@@ -97,35 +97,54 @@ def parse_permissions(args_list: List[str]) -> Dict[str, Dict[str, List[str]]]:
     git:read:write                 -> {'git_tools': {'read': ['*'], 'write': ['*']}}
     file:read=*.py                 -> {'file_tools': {'read': ['*.py']}}
     file:read=README.md,doc/*.md   -> {'file_tools': {'read': ['README.md', 'doc/*.md']}}
+    file:read=doc/README.md:write=doc/README.md.new -> {'file_tools': {'read': ['doc/README.md'], 'write': ['doc/README.md.new']}}
     """
     mapping: Dict[str, Dict[str, List[str]]] = {}
-    # (modkey, cap) of the last "mod:cap=pattern" item; lets a subsequent comma- or
-    # argument-separated bare glob continue that pattern list instead of being
-    # misread as a module name.
+    # (modkey, cap) of the last "mod:cap=pattern" item; lets a subsequent comma-
+    # separated bare pattern continue that pattern list instead of being misread
+    # as a module name.
     last_spec = None
 
     def modkey(name: str) -> str:
         return name if name.endswith("_tools") else f"{name}_tools"
 
     for arg in args_list:
+        last_spec = None
         for item in arg.split(","):
             item = item.strip()
             if not item:
                 continue
             try:
                 if "=" in item:
-                    prefix, pattern = item.split("=", 1)
-                    base, cap = prefix.split(":", 1)
-                    last_spec = (modkey(base), cap)
-                    mapping.setdefault(last_spec[0], {}).setdefault(cap, []).append(pattern.strip())
+                    # Formats: mod:cap=pat  or  mod:cap1=pat1:cap2=pat2
+                    if ":" in item:
+                        mod_name, rest = item.split(":", 1)
+                        mk = modkey(mod_name)
+                        segments = rest.split(":")
+                        for seg in segments:
+                            seg = seg.strip()
+                            if not seg:
+                                continue
+                            if "=" in seg:
+                                cap, pattern = seg.split("=", 1)
+                                cap = cap.strip()
+                                pattern = pattern.strip()
+                                last_spec = (mk, cap)
+                                mapping.setdefault(mk, {}).setdefault(cap, []).append(pattern)
+                            else:
+                                cap = seg
+                                last_spec = (mk, cap)
+                                mapping.setdefault(mk, {}).setdefault(cap, []).append("*")
+                    else:
+                        raise ValueError(f"Missing module in spec: {item}")
                 elif ":" in item:
                     parts = item.split(":")
                     for cap in parts[1:]:
-                        mapping.setdefault(modkey(parts[0]), {}).setdefault(cap, []).append("*")
+                        mapping.setdefault(modkey(parts[0]), {}).setdefault(cap.strip(), []).append("*")
                     last_spec = None
-                elif last_spec and any(c in item for c in "*?[/"):
-                    # continuation of the previous pattern list:
-                    # file:read=README.md,doc/*.md  (was previously parsed as module "doc/*.md")
+                elif last_spec is not None:
+                    # Continuation of the previous pattern list:
+                    # file:read=README.md,doc/*.md  (bare item appends to last spec)
                     mapping[last_spec[0]][last_spec[1]].append(item)
                 else:
                     mapping[modkey(item)] = {"all": ["*"]}   # bare name = full access
@@ -134,6 +153,11 @@ def parse_permissions(args_list: List[str]) -> Dict[str, Dict[str, List[str]]]:
                 logger.warning("Ignoring malformed --tools entry: %r", item)
                 last_spec = None
     return mapping
+
+def _qualified_tool_name(modname: str, func_name: str) -> str:
+    """Build a globally-unique tool name: {short_module}_{func}."""
+    short = modname[:-6] if modname.endswith("_tools") else modname
+    return f"{short}_{func_name}"
 
 def build_tools_from_modules(modules: List[Any], permission_map: Dict[str, Dict[str, List[str]]]):
     """Filters tools based on requested permissions. Only shows tools where user has all required caps."""
@@ -161,6 +185,8 @@ def build_tools_from_modules(modules: List[Any], permission_map: Dict[str, Dict[
 
                 if can_use:
                     schema = generate_openai_schema(obj)
+                    qualified_name = _qualified_tool_name(modname, name)
+                    schema["function"]["name"] = qualified_name
                     pats = [p for cap in required_caps for p in user_caps.get(cap, [])]
                     schema["function"]["description"] += f"\nAllowed file patterns for this session: {pats}"
                     tools.append(schema)
@@ -209,7 +235,7 @@ def main(args):
         MODS_LIST.append(mod)
         for name, obj in inspect.getmembers(mod, inspect.isfunction):
             if getattr(obj, "_is_toolex_tool", False):
-                TOOL_EXECUTION_MAP[name] = mod
+                TOOL_EXECUTION_MAP[_qualified_tool_name(modname, name)] = mod
 
     TOOLS = build_tools_from_modules(MODS_LIST, permission_map)
     logger.debug("exposing %d tools: %s", len(TOOLS), [t["function"]["name"] for t in TOOLS])
@@ -236,9 +262,14 @@ def main(args):
         choice = response["choices"][0]
         if choice.get("finish_reason") == "tool_calls":
             assistant_msg = choice["message"]
-            current_turn_calls = tuple((c["function"]["name"], c["function"]["arguments"]) for c in assistant_msg.get("tool_calls", []))
 
-            # Stall detection (infinite loop)
+            # Stall detection (infinite loop) – use canonical JSON for semantic comparison
+            current_turn_calls = tuple(
+                (c["function"]["name"],
+                 json.dumps(json.loads(c["function"]["arguments"]), sort_keys=True))
+                for c in assistant_msg.get("tool_calls", [])
+            )
+
             if current_turn_calls in executed_states:
                 messages.append({"role": "user", "content": "[System Error: Infinite Loop detected. Summarize and exit.]"})
                 break
@@ -260,7 +291,10 @@ def main(args):
 
                 try:
                     mod_obj = find_module_for_func(TOOL_EXECUTION_MAP, fn_name)
-                    tool_func = getattr(mod_obj, fn_name)
+                    # Resolve the original function name from the qualified tool name
+                    short_prefix = fn_name.split("_", 1)[0]
+                    orig_func_name = fn_name[len(short_prefix) + 1:]
+                    tool_func = getattr(mod_obj, orig_func_name)
                     sig = inspect.signature(tool_func)
                     req_caps = set(getattr(tool_func, "_required_caps", {"read"}))
 
@@ -268,7 +302,7 @@ def main(args):
                     allowed_patterns_for_this_call = []
                     modname = mod_obj.__name__
                     if "all" in permission_map.get(modname, {}):
-                        allowed_patterns_for_this_call = ["*"] # Full access to the module
+                        allowed_patterns_for_this_call = ["*"]  # Full access to the module
                     else:
                         # For each required cap of this specific tool, get its allowed patterns
                         for rc in req_caps:
@@ -281,13 +315,21 @@ def main(args):
                     if not allowed_patterns_for_this_call:
                         raise ValueError(f"Access Denied: tool '{fn_name}' requires capabilities {sorted(req_caps)} not granted for module '{modname}'")
 
-                    # Final execution call (with arg filtering to prevent TypeError)
-                    actual_keys = [p.name for p in sig.parameters.values() if not any(isinstance(p, inspect.Parameter.VAR_KEYWORD) for _ in [])]
-                    # Simple param check: only pass keys present in signature or allow **kwargs logic as before
+                    # Simple param check: only pass keys present in signature or allow **kwargs logic
                     has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
                     exec_args = kwargs if has_var_kw else {k: v for k, v in kwargs.items() if k in sig.parameters}
 
-                    result = execute_tool(mod_obj, fn_name, **exec_args)
+                    # Validate string arguments against allowed glob patterns
+                    if "*" not in allowed_patterns_for_this_call:
+                        for arg_name, arg_val in exec_args.items():
+                            if isinstance(arg_val, str):
+                                if not any(fnmatch.fnmatch(arg_val, pat) for pat in allowed_patterns_for_this_call):
+                                    raise PermissionError(
+                                        f"Access Denied: argument {arg_name}={arg_val!r} "
+                                        f"does not match any allowed pattern {allowed_patterns_for_this_call}"
+                                    )
+
+                    result = execute_tool(mod_obj, orig_func_name, **exec_args)
                 except Exception as e:
                     logger.warning(f"Tool Error: {e}")
                     error_payload = json.dumps({"error": str(e)})
@@ -314,13 +356,12 @@ __all__ = ["execute_tool", "main"]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tools", action="append", nargs="+", default=[], help="e.g., git file:read=*.py", metavar="SPEC")
+    parser.add_argument("--tools", action="append", default=[], help="Permission spec (repeatable)", metavar="SPEC")
     parser.add_argument("--log-level", type=str, choices=["DEBUG","INFO","WARNING","ERROR"], default="INFO")
     parser.add_argument("--workspace-dir", type=str, default=None)
     parser.add_argument("--drop-tool-reasoning", action="store_true")
     parser.add_argument("--total-iterations", type=int, default=30)
     args = parser.parse_args()
-    args.tools = [spec for group in args.tools for spec in group]
 
     try:
         main(args)
