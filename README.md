@@ -113,22 +113,30 @@ echo no changes
 
 | Argument | Description | Default |
 | :--- | :--- | :--- |
-| `--tools <module[:perm]...` | List of tools and permissions available to the LLM. Supports multiple permissions per module using colons (e.g., `git:read:write`). | None |
+| `--tools <module[:capability>=<pattern>...` | List of tools/modules to enable. You can restrict capabilities (e.g., `git:read`) or apply specific path allowances using the `=pattern` syntax (e.g., `file:read=/var/*`). Supports multiple patterns via comma-separation (e.g., `/var/*,/etc/*`). | None |
 | `--workspace-dir <path>` | Sets the working directory for podbash tools | Current dir / `$TOOLEX_WORKSPACE_DIR` |
 
 ### Fine-Grained Permissions
-You can restrict LLM tools using `module:capability=pattern`. 
 
-**Syntax Rules:**
-*   **Multiple rules per command:** Use commas to separate different capability assignments.
-    *   `--tools file:read=README.md,file:write=log.txt` (Correct)
-*   **One rule with multiple files:** Do **not** use commas for filenames. Instead, use shell globbing or provide the flag multiple times. This prevents ambiguity.
+You can control exactly what tools an LLM can access and which files/directories are reachable using colon (`:`) and equal (`=`) syntax. 
 
-| Intent | Correct Syntax | Why? |
+Restrict a module to specific predefined capabilities defined in its implementation (e.g., `read`, `write`, or `all`). This is applied via the `--tools` flag.
+
+*   **Specific Capability:** `./toolex.py --tools git:read "Show me diff"` 
+*   **All Capabilities for a Module:** `./toolex.py --tools git:all "Commit this change"`
+
+For tools that interact with the filesystem, you can restrict access to specific paths or patterns using the `=pattern` syntax. This is particularly powerful for granting broad but controlled access via allowances.
+
+**Syntax:** `module:capability=pattern[,pattern...]`
+
+| Intent | Syntax Example | Note |
 | :--- | :--- | :--- |
-| **Specific Files** | `file:read=README.md file:write=log.txt` | Separate flags for separate rules. |
-| **All Python files**| `file:read=*.py` | Use a glob pattern within the rule. |
-| **Multiple patterns**| `--tools file:read=a.txt --tools file:read=b.txt` | Repeat the flag to add more items. |
+| **Specific File** | `file:read=README.md` | Restricts the tool to only that single file. |
+| **Directory/Glob** | `file:read=/var/*` | Allows access to everything matching the pattern within a directory. |
+| **Multiple Patterns** | `file:read=/var/*,/etc/*` | Use commas to allow multiple distinct paths or patterns in one command. |
+
+> [!TIP]  
+> When using shell-related tools with wildcards (e.g., `*.py`), always wrap your tool arguments in quotes (e.g., `--tools 'file:read=*.py'`) to prevent your local terminal from expanding the glob before it reaches `toolex`.
 
 
 ## Extending the system
