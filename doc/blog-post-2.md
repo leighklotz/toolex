@@ -85,7 +85,7 @@ The model determines that additional information is required, requests the appro
 From the user's perspective, the interaction remains conversational:
 
 ```
-🤖 git branch --no-merged main
+🚀git branch --no-merged main
 ```
 
 The result of that operation becomes part of the conversation history and can be used immediately by subsequent inference steps.
@@ -100,13 +100,21 @@ ask "Summarize the repository changes and prepare a commit command" \
 or:
 
 ```bash
-ask "Find the largest directories consuming disk space" \
+ask "How much disk space is free on this machine?" \
     | tools bash
 ```
 
 The model gains the ability to inspect selected portions of the local environment without receiving unrestricted access to the system as a whole.
 
-As of May 2026 `toolex` is built around decorator-driven discovery via `tooling.discover_tools`. Functions marked with `@tool(capabilities)` are exposed automatically on import, and OpenAI-compatible schemas are derived from docstrings and `Annotated` type hints. Stall detection is active: identical `(name,arguments)` tuples are tracked in `executed_states` and a warning is injected if the model repeats them.
+Capabilities are also scoped in space, not just in kind. A tool specification follows `module[:capability][=pattern[,pattern...]]`, so beyond granting whole modules (`tools git`) or capability classes (`tools git:read`), you can attach glob patterns to a grant:
+
+```bash
+ask "Find TODO comments in the Python sources" | tools 'file:read=*.py'
+```
+
+The permitted patterns are appended to each tool's schema, so the model knows the boundary it is working inside, and the boundary is enforced twice: `toolex.py` matches path-like arguments against the granted globs at runtime, and `file_tools.py` confines reads, writes, edits, and searches to the working directory (`--workspace-dir` / `$TOOLEX_WORKSPACE_DIR`) unless you deliberately grant the `read_anywhere`/`write_anywhere` capabilities. A call to a tool whose capability was never granted is refused outright, and out-of-bounds matches are skipped during glob searches; every refusal arrives as a conversational error naming the allowed patterns, so the model can self-correct.
+
+`toolex` is built around decorator-driven discovery via `tooling.discover_tools`. Functions marked with `@tool(capabilities)` are discovered automatically on import, and OpenAI-compatible schemas are derived from docstrings and `Annotated` type hints — but a tool is exposed to the model only when its module is named in `--tools`, so nothing is leaked implicitly. Agentic runs are capped at 30 tool-call rounds (`--total-iterations`), and stall detection is active: identical `(name,arguments)` tuples are tracked in `executed_states` and the loop terminates gracefully if the model repeats them.
 
 Production use has surfaced implementation details that affect how capabilities should be described. The original `git_tools.py` shipped with duplicate function names — e.g. `get_git_branch` defined twice for `git branch` and `git grep`, and `do_git_checkout` defined twice for `checkout` and `commit`. The second definition wins silently, so the tool surface was incomplete until naming was made unique. That class of bug is now part of the module review checklist.
 
@@ -125,7 +133,7 @@ The conversation remains a stream flowing through standard input and output. Too
 
 Unlike many agent systems, there is no hidden daemon maintaining internal state and no long-running process accumulating context in the background. The conversation itself remains the state, and the shell remains responsible for orchestration.
 
-The magic header `Content-Type: application/x-llm-history+json` continues to be the transport boundary between `ask`/`help`, `toolex`, and `answer`. Cache hits are shown as 🎯, misses as ✨, with additional emojis for piped content, `bx` shell input and `lx` file input.
+The magic header `Content-Type: application/x-llm-history+json` continues to be the transport boundary between `ask`/`help`, `toolex`, and `answer`. Cache hits are shown as 🎯, misses as ✨, with additional emojis for piped content, `bx` shell input and `lx` file input; tool calls trace live to stderr as they run (🚀 for host commands, 🏖️ for sandboxed ones, 🤖 for file-module activity). Assistant reasoning traces ride along in the history by default and can be stripped with `TOOLS_FLAGS=--drop-tool-reasoning` when you want leaner pipelines.
 
 ## Explicit Capabilities and Explicit Trust
 
@@ -148,19 +156,19 @@ The model may invoke `git status` and `git diff`, generate a conventional commit
 Execution, however, remains subject to an explicit approval step:
 
 ```
-🧖 Found targeted block (bash). Proceed? (y/N)
+🤖 Proceed? (y/N)
 ```
 
-The command does not execute until the operator confirms it.
+The command does not execute until the operator confirms it. This is exactly the pipeline the bundled `help-commit` command runs.
 
 ## Trust Caveats
 
-Current conditions add nuance to this trust model. The permission system is capability-based and enforced via `required.issubset(user_perms)`. It is logical, not OS-enforced: a `read`-capable tool such as `get_cat` can still read any path the user process can read, e.g. `/etc/shadow`. Bash tools in `bash_tools.py` are wrapped with `@bash_wrap` and run directly on the host via `subprocess.run`; the Podman sandbox code exists but is not used by default.
+Current conditions add nuance to this trust model. The permission system is capability-based: a tool is only exposed when the granted capabilities cover its required set, and `toolex.py` re-checks every call at runtime, denying any tool whose capability was never granted. Enforcement is still logical, not OS-enforced: the `bash` module's `read`-capable tools such as `get_cat` can read any path the user process can read, e.g. `/etc/shadow`; only the `file` module applies real path confinement. Bash tools in `bash_tools.py` are wrapped with `@bash_wrap` and run directly on the host via `subprocess.run`; the Podman sandbox lives in `podbash_tools.py` behind `@sandbox_wrap` (no network, workspace mounted read-only unless a `write` capability is granted) and runs only when you request the `podbash` module.
 
 Other operational issues:
 
 * Temp handling in `answer`: `_mktemp_reg` falls back to `mktemp -u`, a TOCTOU race. Cleanup via `trap '_cleanup_run_dir'` is PID-guarded but subshells can leak.
-* No request timeouts on `requests.post` or `curl` in the current release, allowing long hangs.
+* Inference requests now time out after 600 seconds (`TOOLS_INFERENCE_TIMEOUT` in `toolex.py`), but the shell layer's `curl` calls remain unguarded, so long hangs are still possible there.
 * Caching is request-hash based with no TTL/eviction and permissions of existing cache files are never checked.
 * Error handling is inconsistent across tools; some return error strings, others raise.
 
@@ -175,3 +183,4 @@ The resulting architecture allows the model to observe selected portions of the 
 In 2026 the toolchain is still intentionally boring: tools are ordinary functions with semantic metadata, permissions are granular and namespaced, errors are conversational feedback for self-correction, and the shell remains the orchestrator. The work now is to keep that simplicity while closing the implementation gaps that real use has exposed.
 
 The next article examines the implementation itself: how ordinary Python functions become model-callable tools, how permissions are enforced in practice, and how tool calls are represented and transported through the same pipeline architecture used by `answer`.
+
