@@ -11,7 +11,7 @@ from typing import Annotated
 from pathlib import Path
 from tooling import tool, discover_tools
 
-WORKING_DIR=os.getcwd()
+WORKING_DIR=os.environ.get("TOOLEX_WORKSPACE_DIR", os.getcwd())
 
 def check_working_dir(file_path):
     """
@@ -24,7 +24,10 @@ def check_working_dir(file_path):
     Raises:
         Exception: If `file_path` does not resolve to a location inside `WORKING_DIR`.
     """
-    if not Path(file_path).resolve().is_relative_to(Path(WORKING_DIR).resolve()):
+    abs_file = Path(os.path.abspath(file_path))
+    abs_workdir = Path(os.path.abspath(WORKING_DIR))
+
+    if not abs_file.is_relative_to(abs_workdir):
         raise Exception(f"cannot access {file_path=} as it is not inside working directory {WORKING_DIR=}")
 
 
