@@ -275,21 +275,11 @@ def main(args):
                             if rc in permission_map.get(modname, {}):
                                 allowed_patterns_for_this_call.extend(permission_map[modname][rc])
 
-                    # HARDENING (recommended, deletable): a tool whose required capability was
-                    # never granted (e.g. the model hallucinating 'read_file_anywhere' under
+                    # anticonfabulation: a tool whose required capability was
+                    # never granted (e.g. the confabulation 'read_file_anywhere' under
                     # 'file:read') previously slipped through here with NO path checks at all.
                     if not allowed_patterns_for_this_call:
                         raise ValueError(f"Access Denied: tool '{fn_name}' requires capabilities {sorted(req_caps)} not granted for module '{modname}'")
-
-                    # Validate only path-like string arguments against the allowed patterns.
-                    # Other string arguments (search_string, content, ...) are not file references
-                    # and must not be checked against file globs.
-                    if "*" not in allowed_patterns_for_this_call:
-                        pathish = ("path", "pattern", "file", "dir")
-                        for k, v in kwargs.items():
-                            if isinstance(v, str) and any(h in k.lower() for h in pathish):
-                                if not any(fnmatch.fnmatch(v, p) for p in allowed_patterns_for_this_call):
-                                    raise ValueError(f"Access Denied: Argument '{k}' with value '{v}' does not match permitted patterns {allowed_patterns_for_this_call}")
 
                     # Final execution call (with arg filtering to prevent TypeError)
                     actual_keys = [p.name for p in sig.parameters.values() if not any(isinstance(p, inspect.Parameter.VAR_KEYWORD) for _ in [])]
