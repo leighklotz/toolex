@@ -229,6 +229,9 @@ def main(args):
     for modname in permission_map:
         try:
             mod = importlib.import_module(modname)
+            if hasattr(mod, "bootstrap"):
+                logger.info("Initializing module %s via bootstrap().", modname)
+                mod.bootstrap(permission_map)
         except ImportError:
             logger.error("Module %s not found.", modname)
             continue
@@ -254,6 +257,7 @@ def main(args):
             payload = {"model": MODEL, "messages": messages}
             if TOOLS:
                 payload["tools"] = TOOLS
+            logger.debug(f"POST %s\n", json.dumps(payload))
             response = requests.post(URL, json=payload, timeout=TOOLS_INFERENCE_TIMEOUT).json()
             if "choices" not in response or not response["choices"]: break
         except Exception as e:
@@ -336,12 +340,17 @@ def main(args):
                     messages.append({"role": "tool", "tool_call_id": call["id"], "content": error_payload})
                     continue
 
-                if not isinstance(result, (dict, list, str, int, float, bool)):
-                    result = {"result": str(result)}
+                # if not isinstance(result, (dict, list, str, int, float, bool)):
+                # result = {"result": str(result)}
+                if isinstance(result, CommandResult):
+                    # D3 FIX: Always use to_payload so the LLM gets JSON, not a Python repr string!
+                    content = json.dumps(result.to_payload())
+                else:
+                    content = str(result)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call["id"],
-                    "content": json.dumps(result, default=str)
+                    "content": content
                 })
         else:
             # Final Response
