@@ -42,8 +42,9 @@ class CommandRegistry:
     def __init__(self):
         self._by_name: Dict[str, CommandSpec] = {}
 
-    def scan(self, mod, permission_map: dict):
-        granted = frozenset(permission_map.get(mod.__name__, set()))
+    def scan(self, mod, permission_map: dict, module_key: str = None):
+        key = module_key or mod.__name__
+        granted = frozenset((permission_map.get(key) or {}).keys())
         for name, obj in inspect.getmembers(mod, inspect.isfunction):
             spec = getattr(obj, "_command_spec", None)
             if not spec: continue
@@ -114,6 +115,10 @@ class MiniShell:
             else: cur.append(t)
         stages.append(cur)
 
+        if any(not s for s in stages):
+            return CommandResult("", "shell syntax error: empty command in pipeline", 2)
+
+
         buffer: Optional[str] = None
         last_res = CommandResult()
 
@@ -123,16 +128,21 @@ class MiniShell:
             if not spec: return CommandResult("", f"command not found: {name} (run 'help')", 127)
             
             # Runtime enforcement of caps and validation
-            if not spec.caps.issubset(self.granted | frozenset(["all"])):
+            if "all" not in self.granted and not spec.caps.issubset(self.granted):
                 return CommandResult("", f"permission denied: {name}", 126)
 
-            if spec.validate and args:
+            if spec.validate:
                 try: spec.validate(" ".join(args))
                 except ValueError as e: return CommandResult("", str(e), 1)
 
             # Execution Logic (Fixes D8/Plan B semantics)
             if spec.mode == "native":
-                res = spec.func(" ".join(args), buffer if args or name else "") # Pass stdin to native
+                if spec.consumes_stdin and buffer is None:
+                    return CommandResult("", f"{name} requires piped input", 1)
+                try:
+                    res = spec.func(" ".join(args), buffer or "")
+                except Exception as e:
+                    return CommandResult("", f"{name}: {e}", 1)
             else:
                 if spec.consumes_stdin and buffer is None:
                     return CommandResult("", f"{name} requires piped input", 1)
@@ -146,4 +156,4 @@ class MiniShell:
                 return CommandResult(res.stdout, f"stage {idx} ({name}) failed (exit {res.exit_code}):\n{res.stderr}", res.exit_code)
             buffer = res.stdout
 
-        return last_res if not isinstance(last_res, str) else CommandResult(last_res, "", 0)
+        return last_res

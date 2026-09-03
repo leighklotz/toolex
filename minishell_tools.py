@@ -1,6 +1,8 @@
 from typing import Annotated, Any, Optional
 from tooling import tool, CommandResult
 from minishell import CommandRegistry, MiniShell, HostRunner
+import bash_tools
+
 
 _shell: Optional[MiniShell] = None
 
@@ -21,14 +23,11 @@ def shell(command_line: Annotated[str, "A command line. Use '|' for pipes. Start
     return _shell.execute(command_line)
 
 def bootstrap(permission_map):
-    """Fallback for local testing."""
-    import bash_tools # This fills the registry via scan in __init__ logic elsewhere
-    global _shell_instance
-    if _shell_instance is None:
-        # Defaulting to local/safe execution for tool testing environments
-        registry = CommandRegistry() 
-        runner = HostRunner() # or PodmanRunner depending on environment configuration
-        import bash_tools
-        registry.scan(bash_tools, permission_map=permission_map)
-        configure(registry, runner)
-
+    global _shell
+    if _shell is None:
+        registry = CommandRegistry()
+        runner = HostRunner()
+        registry.scan(bash_tools, permission_map=permission_map, module_key="minishell_tools")
+        bash_tools.set_registry(registry)
+        granted = frozenset(permission_map.get("minishell_tools", {}))
+        configure(registry, runner, granted)

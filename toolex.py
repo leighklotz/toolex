@@ -9,20 +9,22 @@
 
 # This version addresses all critical failures identified in your feedback: it fixes the "Bridge" failure by ensuring a single, consistent permission structure is used throughout; it implements true path-based/resource restriction via glob pattern matching during runtime execution; and it eliminates redundant logic and unused imports.
 
-import logging
+import argparse
+import fnmatch
 import importlib
 import inspect
 import json
+import logging
 import os
 import requests
 import sys
-import fnmatch
+from tooling import CommandResult
 from typing import get_origin, get_args, Union, Any, Dict, List, Annotated, get_type_hints
-import argparse
+
 
 # Logging configuration
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARN,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     datefmt="%H:%M:%S",
 )
@@ -187,7 +189,10 @@ def build_tools_from_modules(modules: List[Any], permission_map: Dict[str, Dict[
                     schema = generate_openai_schema(obj)
                     qualified_name = _qualified_tool_name(modname, name)
                     schema["function"]["name"] = qualified_name
-                    pats = [p for cap in required_caps for p in user_caps.get(cap, [])]
+                    if "all" in user_caps:
+                        pats = ["*"]
+                    else:
+                        pats = [p for cap in required_caps for p in user_caps.get(cap, [])]
                     schema["function"]["description"] += f"\nAllowed file patterns for this session: {pats}"
                     tools.append(schema)
 
@@ -209,7 +214,8 @@ def find_module_for_func(mod_registry, func_name):
 
 def main(args):
     numeric_level = getattr(logging, args.log_level.upper(), None)
-    logger.setLevel(numeric_level if isinstance(numeric_level, int) else logging.INFO)
+    logger.setLevel(numeric_level if isinstance(numeric_level, int) else logging.WARN)
+    logging.info("INFO")
 
     if args.workspace_dir:
         os.environ["TOOLEX_WORKSPACE_DIR"] = args.workspace_dir
@@ -230,7 +236,7 @@ def main(args):
         try:
             mod = importlib.import_module(modname)
             if hasattr(mod, "bootstrap"):
-                logger.info("Initializing module %s via bootstrap().", modname)
+                logger.debug("Initializing module %s via bootstrap().", modname)
                 mod.bootstrap(permission_map)
         except ImportError:
             logger.error("Module %s not found.", modname)
