@@ -254,7 +254,11 @@ def main(args):
             payload = {"model": MODEL, "messages": messages}
             if TOOLS:
                 payload["tools"] = TOOLS
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("--- LLM REQUEST ---\n%s", json.dumps(payload, indent=2))
             response = requests.post(URL, json=payload, timeout=TOOLS_INFERENCE_TIMEOUT).json()
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("--- LLM RESPONSE ---\n%s", json.dumps(response, indent=2))
             if "choices" not in response or not response["choices"]: break
         except Exception as e:
             logger.error(f"API Error: {e}"); break
