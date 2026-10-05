@@ -147,7 +147,7 @@ def parse_permissions(args_list: List[str]) -> Dict[str, Dict[str, List[str]]]:
                     # file:read=README.md,doc/*.md  (bare item appends to last spec)
                     mapping[last_spec[0]][last_spec[1]].append(item)
                 else:
-                    mapping[modkey(item)] = {"all": ["*"]}   # bare name = full access
+                    mapping[modkey(item)] = {"read": ["*"]}   # bare name = read access
                     last_spec = None
             except ValueError:
                 logger.warning("Ignoring malformed --tools entry: %r", item)
