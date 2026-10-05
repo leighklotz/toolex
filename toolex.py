@@ -256,7 +256,9 @@ def main(args):
                 payload["tools"] = TOOLS
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug("--- LLM REQUEST ---\n%s", json.dumps(payload, indent=2))
-            response = requests.post(URL, json=payload, timeout=TOOLS_INFERENCE_TIMEOUT).json()
+            key = os.getenv("OPENAI_API_KEY", None)
+            headers={"Authorization": f"Bearer {key}"} if key else None
+            response = requests.post(URL, json=payload, headers=headers, timeout=TOOLS_INFERENCE_TIMEOUT).json()
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug("--- LLM RESPONSE ---\n%s", json.dumps(response, indent=2))
             if "choices" not in response or not response["choices"]: break
