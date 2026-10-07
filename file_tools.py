@@ -123,7 +123,7 @@ def read_file_in_workdir(
     file_path: Annotated[str, "The path to the file you wish to read. Can be relative or absolute. file_path must be inside working dir."]
 ) -> str:
     """Returns the contents of a text file as a single string."""
-    print(f"🤖📥{file_path}", file=sys.stderr, end='')
+    print(f"🤖📥{file_path}", file=sys.stderr, end='', flush=True)
     check_permitted_path(file_path)
     return _read_file_impl(file_path)
 
@@ -132,7 +132,7 @@ def read_file_anywhere(
     file_path: Annotated[str, "The path to the file you wish to read. Can be relative or absolute."]
 ) -> str:
     """Returns the contents of a text file as a single string."""
-    print(f"🤖📥{file_path}", file=sys.stderr, end='')
+    print(f"🤖📥{file_path}", file=sys.stderr, end='', flush=True)
     check_permitted_path(file_path, contain=False)
     return _read_file_impl(file_path)
 
@@ -142,7 +142,7 @@ def write_file_anywhere(
     content: Annotated[str, "The full string content to write into the file."]
 ) -> str:
     """Writes text content to a file, overwriting existing content or creating new files."""
-    print(f"🤖💾{file_path}", file=sys.stderr, end='')
+    print(f"🤖💾{file_path}", file=sys.stderr, end='', flush=True)
     check_permitted_path(file_path, contain=False)
     return _write_file_impl(file_path, content)
 
@@ -152,7 +152,7 @@ def write_file_in_workdir(
     content: Annotated[str, "The full string content to write into the file."]
 ) -> str:
     """Writes text content to a file, overwriting existing content or creating new files."""
-    print(f"🤖💾{file_path}", file=sys.stderr, end='')
+    print(f"🤖💾{file_path}", file=sys.stderr, end='', flush=True)
     check_permitted_path(file_path)
     return _write_file_impl(file_path, content)
 
@@ -162,7 +162,7 @@ def edit_file_in_workdir(
     edit_instructions: Annotated[str, "A string containing replacement instructions using the format 'replace:old_text:new_text'. Example: 'replace:hello:hi'"]
 ) -> str:
     """Applies a specific text substitution to an existing file. Requires precise formatting."""
-    print(f"🤖📝✒️ {file_path}", file=sys.stderr, end='')
+    print(f"🤖📝✒️ {file_path}", file=sys.stderr, end='', flush=True)
     check_permitted_path(file_path)
     try:
         if "replace:" not in edit_instructions:
@@ -184,7 +184,7 @@ def edit_file_anywhere(
     edit_instructions: Annotated[str, "A string containing replacement instructions using the format 'replace:old_text:new_text'. Example: 'replace:hello:hi'"]
 ) -> str:
     """Applies a specific text substitution to an existing file. Requires precise formatting."""
-    print(f"🤖📝✒️ {file_path}", file=sys.stderr, end='')
+    print(f"🤖📝✒️ {file_path}", file=sys.stderr, end='', flush=True)
     check_permitted_path(file_path, contain=False)
     try:
         if not "replace:" in edit_instructions:
@@ -206,7 +206,7 @@ def search_files_in_workdir(
 ) -> str:
     """Searches through multiple files matching a pattern and returns names of files containing the search string."""
     case_icon = "🔡" if case_insensitive else ""
-    print(f"🤖🔍{case_icon}'{search_string}' in '{file_pattern}'", file=sys.stderr, end='')
+    print(f"🤖🔍{case_icon}'{search_string}' in '{file_pattern}'", file=sys.stderr, end='', flush=True)
     return _search_files_impl(file_pattern, search_string, case_insensitive, check_fn=check_permitted_path)
 
 @tool(capabilities="read_anywhere")
@@ -217,7 +217,7 @@ def search_files_anywhere(
 ) -> str:
     """Searches through multiple files matching a pattern and returns names of files containing the search string."""
     case_icon = "🔡" if case_insensitive else ""
-    print(f"🤖🔍{case_icon}'{search_string}' in '{file_pattern}'", file=sys.stderr, end='')
+    print(f"🤖🔍{case_icon}'{search_string}' in '{file_pattern}'", file=sys.stderr, end='', flush=True)
     return _search_files_impl(file_pattern, search_string, case_insensitive,
                               check_fn=functools.partial(check_permitted_path, contain=False))
 @tool(capabilities="read")
@@ -226,7 +226,7 @@ def read_files_in_workdir(
 ) -> str:
     """Reads all files matching a glob pattern and returns their contents, each
     preceded by a '===== <path> =====' header line."""
-    print(f"🤖📥📚{file_pattern}", file=sys.stderr, end='')
+    print(f"🤖📥📚{file_pattern}", file=sys.stderr, end='', flush=True)
     matched = sorted(glob.glob(file_pattern))
     if not matched:
         return f"Error: no files match pattern {file_pattern!r}"
