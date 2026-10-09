@@ -210,7 +210,8 @@ class PodmanRunner:
 
 def _reject(rest, bad, msg):
     """Exact matches and prefix patterns (entries ending in '*')."""
-    hit = [t for t in rest if t in bad or any(t.startswith(p) for p in bad if p.endswith("*"))]
+    prefixes = tuple(p[:-1] for p in bad if p.endswith("*"))
+    hit = [t for t in rest if t in bad or t.startswith(prefixes)]
     if hit:
         raise ValueError(f"{msg}: {', '.join(hit)}")
 
@@ -386,18 +387,19 @@ def _find(args: str = "", stdin: str | None = None) -> CommandResult:
 #     the extension point for future pure-Python filters.
 
 @command("echo", doc="Print arguments joined by spaces, then a newline.", native=True)
-def _echo(args: str = "", stdin: str | None = None) -> CommandResult:
-    return CommandResult((args + "\n") if args else "\n", "", 0)
+def _echo(args: list[str] | None = None, stdin: str | None = None) -> CommandResult:
+    parts = args or []
+    return CommandResult((" ".join(parts) + "\n") if parts else "\n", "", 0)
 
 
 @command("printf", doc="C-style printf: printf 'fmt' args... (%s %d %f %%, \\n \\t)", native=True)
-def _printf(args: str = "", stdin: str | None = None) -> CommandResult:
+def _printf(args: list[str] | None = None, stdin: str | None = None) -> CommandResult:
+    toks = args or []
+    if not toks:
+        return CommandResult("", "", 0)
+    fmt, vals = toks[0], toks[1:]
+    out, vi, i = [], 0, 0
     try:
-        toks = shlex.split(args)
-        if not toks:
-            return CommandResult("", "", 0)
-        fmt, vals = toks[0], toks[1:]
-        out, vi, i = [], 0, 0
         while i < len(fmt):
             c = fmt[i]
             if c == "\\" and i + 1 < len(fmt):
@@ -416,11 +418,11 @@ def _printf(args: str = "", stdin: str | None = None) -> CommandResult:
                 i += 2
             else:
                 out.append(c); i += 1
-        return CommandResult("".join(out), "", 0)
     except IndexError:
         return CommandResult("", "printf: not enough arguments for format", 1)
     except Exception as e:
         return CommandResult("", f"printf: {e}", 1)
+    return CommandResult("".join(out), "", 0)
 
 
 @command("help", doc="Print the full command index for the current permission grant.", native=True)
@@ -525,10 +527,13 @@ class MiniShell:
                 cur.append(t)
         stages.append(cur)
 
-        buffer = None
+        # Reject empty segments BEFORE any stage runs.
         for i, toks in enumerate(stages, 1):
             if not toks:
                 return CommandResult("", f"empty pipeline segment at stage {i}", 2)
+
+        buffer = None
+        for i, toks in enumerate(stages, 1):
             name, rest = toks[0], toks[1:]
             spec = self._reg.get(name)
             if spec is None:
@@ -542,7 +547,7 @@ class MiniShell:
                 except ValueError as e:
                     return CommandResult("", f"{name}: {e}", 1)
             if spec.native:
-                res = _call(spec.func, " ".join(rest), buffer)
+                res = _call(spec.func, rest, buffer)
             else:
                 if spec.consumes_stdin and buffer is None and not _has_file_operand(rest, spec):
                     return CommandResult("", f"{name} reads stdin; give it file arguments "

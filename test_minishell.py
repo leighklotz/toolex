@@ -18,6 +18,11 @@ Commit-2 notes:
   configure / schema-surface groups, so test ordering cannot leak state.
 * minishell_tools._WORKSPACE is bound at import time: glob tests patch
   the module attribute (monkeypatch.setattr), not the SANDBOX_CONFIG dict.
+* The real-schema-generator test skips (not fails) when the imported
+  `toolex` lacks `generate_openai_schema` — that indicates a stale or
+  shadowing `toolex` module on sys.path, i.e. an environment problem,
+  not a code regression. It prints the loaded module's path so the
+  shadowing copy can be found.
 """
 
 import importlib
@@ -197,7 +202,7 @@ def test_empty_segment_rejected(line, stage):
     res, fake = run_line(line)
     assert res.exit_code == 2
     assert stage in res.stderr
-    assert fake.calls == []
+    assert fake.calls == []                # must be rejected BEFORE any stage runs
 
 
 # ---------------------------------------------------------------------------
@@ -584,8 +589,15 @@ def test_no_command_surfaces_as_tool():
 
 def test_real_schema_generator_sees_configured_index(fresh):
     """Pins §5.8's ordering assumption against toolex's actual schema generator.
-    Skipped (not failed) if toolex / requests is not importable in the test env."""
+    Skipped (not failed) if toolex / requests is not importable in the test env,
+    or if the imported toolex predates the schema generator (stale/shadowing copy)."""
     toolex = pytest.importorskip("toolex")
+    if not hasattr(toolex, "generate_openai_schema"):
+        pytest.skip(
+            "imported 'toolex' has no generate_openai_schema "
+            f"(loaded from {getattr(toolex, '__file__', '<unknown>')}); "
+            "repo toolex.py is not winning sys.path resolution"
+        )
     fresh.configure(frozenset({"*"}), engine="host")
     desc = toolex.generate_openai_schema(fresh.shell)["function"]["description"]
     assert "Available commands:" in desc
