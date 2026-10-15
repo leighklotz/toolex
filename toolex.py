@@ -325,15 +325,20 @@ def main(args):
                     has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
                     exec_args = kwargs if has_var_kw else {k: v for k, v in kwargs.items() if k in sig.parameters}
 
-                    # Validate string arguments against allowed glob patterns
-                    if "*" not in allowed_patterns_for_this_call:
-                        for arg_name, arg_val in exec_args.items():
-                            if isinstance(arg_val, str):
-                                if not any(fnmatch.fnmatch(arg_val, pat) for pat in allowed_patterns_for_this_call):
-                                    raise PermissionError(
-                                        f"Access Denied: argument {arg_name}={arg_val!r} "
-                                        f"does not match any allowed pattern {allowed_patterns_for_this_call}"
-                                    )
+                    # Validate ONLY path-designated arguments against the allowed glob patterns.
+                    # Non-path strings (content, search_string, edit_instructions, command_line,
+                    # git args, …) pass through untouched.
+                    _path_args: frozenset = getattr(tool_func, "_path_args", frozenset())
+                    if "*" not in allowed_patterns_for_this_call and _path_args:
+                        for arg_name in _path_args & exec_args.keys():
+                            arg_val = exec_args[arg_name]
+                            if isinstance(arg_val, str) and not any(
+                                fnmatch.fnmatch(arg_val, pat) for pat in allowed_patterns_for_this_call
+                            ):
+                                raise PermissionError(
+                                    f"Access Denied: argument {arg_name}={arg_val!r} "
+                                    f"does not match any allowed pattern {allowed_patterns_for_this_call}"
+                                )
 
                     result = execute_tool(mod_obj, orig_func_name, **exec_args)
                 except Exception as e:
@@ -373,4 +378,3 @@ if __name__ == "__main__":
         main(args)
     except KeyboardInterrupt:
         sys.exit(1)
-
