@@ -233,6 +233,18 @@ def main(args):
             logger.error("Module %s not found.", modname)
             continue
         MODS_LIST.append(mod)
+        # Hand the module its granted caps and engine BEFORE tool schemas are
+        # built: a module exposing configure() (minishell) narrows its runtime
+        # capability grant and rewrites tool docstrings with the granted
+        # command index. Without this call the module keeps its permissive
+        # default ('*'), so '--tools minishell:read' would not be read-only.
+        if hasattr(mod, "configure"):
+            granted_caps = set(permission_map[modname].keys())
+            if "all" in granted_caps:
+                granted_caps = {"*"}   # wildcard grant: module may do everything
+            mod.configure(frozenset(granted_caps), args.engine)
+            logger.debug("configured %s: caps=%s engine=%s",
+                         modname, sorted(granted_caps), args.engine)
         for name, obj in inspect.getmembers(mod, inspect.isfunction):
             if getattr(obj, "_is_toolex_tool", False):
                 TOOL_EXECUTION_MAP[_qualified_tool_name(modname, name)] = mod
@@ -370,6 +382,8 @@ if __name__ == "__main__":
     parser.add_argument("--tools", action="append", default=[], help="Permission spec (repeatable)", metavar="SPEC")
     parser.add_argument("--log-level", type=str, choices=["DEBUG","INFO","WARNING","ERROR"], default="INFO")
     parser.add_argument("--workspace-dir", type=str, default=None)
+    parser.add_argument("--engine", choices=["host", "podman"], default="host",
+                        help="Execution engine for modules with a configure() hook (minishell)")
     parser.add_argument("--drop-tool-reasoning", action="store_true")
     parser.add_argument("--total-iterations", type=int, default=30)
     args = parser.parse_args()
