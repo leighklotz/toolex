@@ -350,7 +350,7 @@ def test_stdin_guard_denials_message_text(line, cmd):
 @pytest.mark.parametrize("line,argv", [
     ("cat notes.txt", ["cat", "notes.txt"]),
     ("grep foo file.py", ["grep", "foo", "file.py"]),
-    ("sed s/a/b/ file.py", ["sed", "s/a/b/", "file.py"]),
+    ("sed s/a/b/ file.py", ["sed", "--sandbox", "s/a/b/", "file.py"]),
 ])
 def test_stdin_guard_passes_with_file_operand(line, argv):
     res, fake = run_line(line, results=[minishell_tools.CommandResult("ok\n", "", 0)])
@@ -515,6 +515,51 @@ def test_podman_runner_isolation_contract(tmp_path, monkeypatch, fake_proc, caps
     assert cmd[-1] == "ls"
     assert log["kw"]["stdin"] is subprocess.DEVNULL
     assert r.stdout == "OUT" and r.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# e2e: real sed over a tmp workspace, read grant (needs sed on PATH)
+# ---------------------------------------------------------------------------
+
+def _read_grant_shell():
+    return minishell_tools.MiniShell(minishell_tools._REGISTRY,
+                                     minishell_tools.HostRunner(),
+                                     frozenset({"read"}))
+
+
+@pytest.mark.parametrize("script", [
+    "w out.txt",             # file write
+    "W out.txt",             # file write
+    "e touch escape.txt",    # command execution
+    "r /etc/passwd",         # file read (info leak)
+    "s/b/B/w out.txt",       # s///w flag
+    "s/b/B/e",               # s///e flag
+])
+def test_sed_sandbox_blocks_side_effect_scripts(tmp_path, monkeypatch, script):
+    d = tmp_path / "ws"
+    d.mkdir()
+    monkeypatch.setitem(minishell_tools.SANDBOX_CONFIG, "host_data_dir", str(d))
+    res = _read_grant_shell().execute(f"printf abc | sed '{script}'")
+    assert res.exit_code != 0
+    assert "sandbox" in res.stderr
+    assert not (d / "out.txt").exists()
+    assert not (d / "escape.txt").exists()
+
+
+def test_sed_sandbox_keeps_normal_edits(tmp_path, monkeypatch):
+    d = tmp_path / "ws"
+    d.mkdir()
+    monkeypatch.setitem(minishell_tools.SANDBOX_CONFIG, "host_data_dir", str(d))
+    (d / "in.txt").write_text("abc\n")
+    res = _read_grant_shell().execute("sed 's/b/B/g' in.txt")
+    assert res.exit_code == 0 and res.stdout == "aBc\n"
+    res = _read_grant_shell().execute("printf abc | sed 's/b/B/'")
+    assert res.exit_code == 0 and res.stdout == "aBc\n"
+
+
+def test_sed_argv_pinned_before_user_tokens():
+    spec = minishell_tools._REGISTRY.get("sed")
+    assert spec.argv == ("sed", "--sandbox")
 
 
 # ---------------------------------------------------------------------------

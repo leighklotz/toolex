@@ -147,8 +147,21 @@ class CommandRegistry:
         return self._by_name.get(name)
 
     def index(self, granted: frozenset[str], limit: int | None = 4096) -> str:
-        lines = sorted(f"{s.name} — {s.doc}{'  [stdin]' if s.consumes_stdin else ''}"
-                       for s in self._by_name.values() if _allowed(s, granted))
+        # Grant header makes the index self-describing.
+        if "*" in granted:
+            grant_str = "*"
+        else:
+            grant_str = " ".join(sorted(granted))
+        lines = [f"grant: {grant_str}"]
+        for s in sorted(self._by_name.values(), key=lambda s: s.name):
+            if not _allowed(s, granted):
+                continue
+            tags = ""
+            if "write" in s.caps:
+                tags += "  [write]"
+            if s.consumes_stdin:
+                tags += "  [stdin]"
+            lines.append(f"{s.name} — {s.doc}{tags}")
         text = "\n".join(lines)
         if limit is None or len(text) <= limit:
             return text
@@ -344,8 +357,9 @@ def _grep(args: str = "", stdin: str | None = None) -> CommandResult:
     raise NotImplementedError
 
 
-@command("sed", doc="Stream editor: sed 's/old/new/[g]' [FILE...]  (-i is disabled; use patch)",
+@command("sed", doc="Stream editor: sed 's/old/new/[g]' [FILE...]  (sandboxed: -i, w, W, r, e disabled)",
          consumes_stdin=True, nonfile_operands=1,   # first positional is the script
+         argv=("sed", "--sandbox"),                 # pinned before user tokens; GNU sed has no --no-sandbox
          validate=_guard_sed)
 def _sed(args: str = "", stdin: str | None = None) -> CommandResult:
     raise NotImplementedError
@@ -580,13 +594,22 @@ def command_index() -> str:
 
 
 def configure(granted, engine: str = "host"):
-    """Called once by toolex after module load, BEFORE tool schemas are built."""
-    global _GRANTED, _runner
+    """Called once by toolex after module load, BEFORE tool schemas are built.
+
+    Emits a permission banner + denied list into the shell tool's docstring
+    so the LLM sees the mode and exclusions before acting — no set-difference
+    inference required.
+    """
+    global _GRANTED, _runner, shell
     _GRANTED = frozenset(granted)
     _runner = PodmanRunner() if engine == "podman" else HostRunner()
-    global shell
-    shell.__doc__ = (shell.__doc__ or "").rstrip() + \
-        "\n\nAvailable commands:\n" + _REGISTRY.index(_GRANTED)
+    denied = sorted(s.name for s in _REGISTRY._by_name.values()
+                    if not _allowed(s, _GRANTED))
+    mode = "read-only" if "write" not in _GRANTED else "read+write"
+    shell.__doc__ = (shell.__doc__ or "").rstrip() + (
+        f"\n\nPermission mode: {mode}."
+        + (f" Disabled this session: {', '.join(denied)}." if denied else "")
+        + "\n\nAvailable commands:\n" + _REGISTRY.index(_GRANTED))
 
 
 # ===========================================================================

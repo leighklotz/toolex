@@ -39,6 +39,10 @@ def tool(capabilities: Union[str, List[str], Callable] = None,
         (or glob patterns).  toolex.py's runtime enforcement validates *only*
         these arguments against the session's allowed glob patterns.  Omit for
         tools whose parameters are never paths (e.g. shell, git).
+
+    The decorator also prepends a "Capabilities: …" header to the function's
+    docstring so the OpenAI schema generator (which reads inspect.getdoc)
+    always includes the capability line in the tool description.
     """
     # Case 1: User used @tool (no parentheses). 'capabilities' is the function being decorated.
     if callable(capabilities):
@@ -59,6 +63,15 @@ def tool(capabilities: Union[str, List[str], Callable] = None,
         f._is_toolex_tool = True
         f._required_caps = caps_set
         f._path_args = frozenset(path_args) if path_args else frozenset()
+
+        # Render the capability into the docstring so it appears in the
+        # generated tool schema description — a uniform, machine-parseable
+        # header that never drifts from the grant.
+        if caps_set:
+            cap_header = f"Capabilities: {' '.join(sorted(caps_set))}"
+            existing_doc = (f.__doc__ or "").strip()
+            f.__doc__ = cap_header + "\n" + existing_doc if existing_doc else cap_header
+
         return f
 
     # Case 2 & 3: User used @tool(...) or @tool(). Return the decorator factory.

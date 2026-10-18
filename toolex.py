@@ -35,6 +35,11 @@ URL = f"{VIA_API_CHAT_BASE}/v1/chat/completions"
 MAGIC_HEADER = "Content-Type: application/x-llm-history+json"
 TOOLS_INFERENCE_TIMEOUT=600
 
+# Capabilities that imply mutation (used to choose the correct imperative
+# phrasing in per-tool permission descriptions).
+_MUTATING_CAPS = frozenset({"write", "write_anywhere", "edit", "edit_anywhere"})
+
+
 def generate_openai_schema(obj):
     """Generates an OpenAI tool schema using Strategic Docstrings and Annotated metadata."""
     sig = inspect.signature(obj)
@@ -187,8 +192,27 @@ def build_tools_from_modules(modules: List[Any], permission_map: Dict[str, Dict[
                     schema = generate_openai_schema(obj)
                     qualified_name = _qualified_tool_name(modname, name)
                     schema["function"]["name"] = qualified_name
-                    pats = [p for cap in required_caps for p in user_caps.get(cap, [])]
-                    schema["function"]["description"] += f"\nAllowed file patterns for this session: {pats}"
+
+                    # Per-operation imperative permission line (step 4).
+                    # Only tools with path_args get a file-pattern sentence;
+                    # tools without path_args (e.g. minishell shell) rely on
+                    # the permission banner already embedded in their docstring.
+                    path_args = getattr(obj, "_path_args", frozenset())
+                    if path_args:
+                        pats = [p for cap in required_caps for p in user_caps.get(cap, [])]
+                        if not pats:
+                            pats = ["*"]
+                        if required_caps & _MUTATING_CAPS:
+                            if "*" in pats:
+                                schema["function"]["description"] += "\nMay create/modify any path in the workdir."
+                            else:
+                                schema["function"]["description"] += f"\nMay create/modify ONLY paths matching: {', '.join(pats)}. Other paths are rejected."
+                        else:
+                            if "*" in pats:
+                                schema["function"]["description"] += "\nMay read any path in the workdir."
+                            else:
+                                schema["function"]["description"] += f"\nMay read ONLY paths matching: {', '.join(pats)}. Other paths are rejected."
+
                     tools.append(schema)
 
     return tools
@@ -205,6 +229,42 @@ def execute_tool(mod_obj, func_name, *args, **kwargs):
 def find_module_for_func(mod_registry, func_name):
     if func_name in mod_registry: return mod_registry[func_name]
     raise ValueError(f"Tool function {func_name} not found.")
+
+
+def _build_session_preamble(permission_map: Dict[str, Dict[str, List[str]]]) -> str:
+    """Step 5: one-sentence session preamble summarizing effective permissions.
+
+    Costs ~10 tokens in the system prompt; makes the permission state
+    unmissable even if the model skims individual tool descriptions.
+    """
+    parts: List[str] = []
+    for modname, caps in sorted(permission_map.items()):
+        short = modname[:-6] if modname.endswith("_tools") else modname
+        if short == "minishell":
+            if "all" in caps:
+                mode = "read+write"
+            elif "write" in caps:
+                mode = "read+write"
+            else:
+                mode = "read-only"
+            parts.append(f"shell: {mode}")
+        elif short == "file":
+            readable = caps.get("read", []) + caps.get("read_anywhere", [])
+            writable = (caps.get("write", []) + caps.get("write_anywhere", [])
+                        + caps.get("edit", []) + caps.get("edit_anywhere", []))
+            if readable:
+                if readable == ["*"]:
+                    parts.append("readable files: *")
+                else:
+                    parts.append(f"readable files: {', '.join(readable)}")
+            if writable:
+                if writable == ["*"]:
+                    parts.append("writable files: *")
+                else:
+                    parts.append(f"writable files: {', '.join(writable)}")
+    if not parts:
+        return ""
+    return "Permissions — " + "; ".join(parts) + "."
 
 
 def main(args):
@@ -255,6 +315,12 @@ def main(args):
     if args.tools and not TOOLS:
         logger.error("No tools resolved from --tools %s; refusing to run.", args.tools)
         sys.exit(2)
+
+    # Step 5: inject a one-line session preamble as the first system message.
+    preamble = _build_session_preamble(permission_map)
+    if preamble:
+        messages.insert(0, {"role": "system", "content": preamble})
+        logger.debug("session preamble: %s", preamble)
 
     executed_states = set()
 
