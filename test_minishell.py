@@ -145,6 +145,12 @@ def test_quoted_operators_and_wildcards_are_literal(ws):
     assert res.stdout == "*.py\n" and fake.calls == []
 
 
+def test_mixed_quoted_and_unquoted_glob_characters(ws):
+    (ws / "literal*1.txt").touch()
+    (ws / "literalA1.txt").touch()
+    assert minishell_tools._split("ls 'literal*'?.txt") == ["ls", "literal*1.txt"]
+
+
 def test_glob_expands_sorted(ws):
     # sub/c.py must NOT match: "*.py" is not recursive across directories
     assert minishell_tools._split("ls *.py") == ["ls", "a.py", "b.py"]

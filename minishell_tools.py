@@ -624,7 +624,7 @@ def _split_tokens(line: str) -> list[tuple[str, bool]]:
         # through literally and the command reports them as missing — safe and
         # self-explaining.
         pattern = "".join(
-            "\\" + char if quoted and char in "*?[\\" else char
+            glob.escape(char) if quoted else char
             for char, quoted in zip(t, protected)
         )
         has_unquoted_glob = any(
