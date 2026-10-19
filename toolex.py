@@ -35,6 +35,11 @@ URL = f"{VIA_API_CHAT_BASE}/v1/chat/completions"
 MAGIC_HEADER = "Content-Type: application/x-llm-history+json"
 TOOLS_INFERENCE_TIMEOUT=600
 
+# Capabilities that imply mutation (used to choose the correct imperative
+# phrasing in per-tool permission descriptions).
+_MUTATING_CAPS = frozenset({"write", "write_anywhere", "edit", "edit_anywhere"})
+
+
 def generate_openai_schema(obj):
     """Generates an OpenAI tool schema using Strategic Docstrings and Annotated metadata."""
     sig = inspect.signature(obj)
@@ -184,11 +189,38 @@ def build_tools_from_modules(modules: List[Any], permission_map: Dict[str, Dict[
                     can_use = True
 
                 if can_use:
-                    schema = generate_openai_schema(obj)
                     qualified_name = _qualified_tool_name(modname, name)
+
+                    # Per-operation imperative permission line (step 4).
+                    # Only tools with path_args get a file-pattern sentence;
+                    # tools without path_args (e.g. minishell shell) rely on
+                    # the permission banner already embedded in their docstring.
+                    path_args = getattr(obj, "_path_args", frozenset())
+                    scoped_patterns = [
+                        pattern for cap in required_caps
+                        for pattern in user_caps.get(cap, [])
+                    ]
+                    if scoped_patterns and "*" not in scoped_patterns and not path_args:
+                        raise ValueError(
+                            f"Tool '{qualified_name}' cannot enforce scoped path grants"
+                        )
+                    schema = generate_openai_schema(obj)
                     schema["function"]["name"] = qualified_name
-                    pats = [p for cap in required_caps for p in user_caps.get(cap, [])]
-                    schema["function"]["description"] += f"\nAllowed file patterns for this session: {pats}"
+                    if path_args:
+                        pats = scoped_patterns
+                        if not pats:
+                            pats = ["*"]
+                        if required_caps & _MUTATING_CAPS:
+                            if "*" in pats:
+                                schema["function"]["description"] += "\nMay create/modify any path in the workdir."
+                            else:
+                                schema["function"]["description"] += f"\nMay create/modify ONLY paths matching: {', '.join(pats)}. Other paths are rejected."
+                        else:
+                            if "*" in pats:
+                                schema["function"]["description"] += "\nMay read any path in the workdir."
+                            else:
+                                schema["function"]["description"] += f"\nMay read ONLY paths matching: {', '.join(pats)}. Other paths are rejected."
+
                     tools.append(schema)
 
     return tools
@@ -202,9 +234,56 @@ def execute_tool(mod_obj, func_name, *args, **kwargs):
     except Exception as exc:
         raise RuntimeError(f"Execution of {func_name} failed: {exc}") from exc
 
+
+def _serialize_result(result):
+    """Serialize structured tool results while preserving the legacy fallback."""
+    to_payload = getattr(result, "to_payload", None)
+    if callable(to_payload):
+        return to_payload()
+    if isinstance(result, (dict, list, str, int, float, bool)):
+        return result
+    return {"result": str(result)}
+
+
 def find_module_for_func(mod_registry, func_name):
     if func_name in mod_registry: return mod_registry[func_name]
     raise ValueError(f"Tool function {func_name} not found.")
+
+
+def _build_session_preamble(permission_map: Dict[str, Dict[str, List[str]]]) -> str:
+    """Step 5: one-sentence session preamble summarizing effective permissions.
+
+    Costs ~10 tokens in the system prompt; makes the permission state
+    unmissable even if the model skims individual tool descriptions.
+    """
+    parts: List[str] = []
+    for modname, caps in sorted(permission_map.items()):
+        short = modname[:-6] if modname.endswith("_tools") else modname
+        if short == "minishell":
+            if "all" in caps or "*" in caps:
+                mode = "read+write"
+            elif "write" in caps:
+                mode = "read+write"
+            else:
+                mode = "read-only"
+            parts.append(f"shell: {mode}")
+        elif short == "file":
+            readable = caps.get("read", []) + caps.get("read_anywhere", [])
+            writable = (caps.get("write", []) + caps.get("write_anywhere", [])
+                        + caps.get("edit", []) + caps.get("edit_anywhere", []))
+            if readable:
+                if readable == ["*"]:
+                    parts.append("readable files: *")
+                else:
+                    parts.append(f"readable files: {', '.join(readable)}")
+            if writable:
+                if writable == ["*"]:
+                    parts.append("writable files: *")
+                else:
+                    parts.append(f"writable files: {', '.join(writable)}")
+    if not parts:
+        return ""
+    return "Permissions — " + "; ".join(parts) + "."
 
 
 def main(args):
@@ -233,16 +312,38 @@ def main(args):
             logger.error("Module %s not found.", modname)
             continue
         MODS_LIST.append(mod)
+        # Hand the module its granted caps and engine BEFORE tool schemas are
+        # built: a module exposing configure() (minishell) narrows its runtime
+        # capability grant and rewrites tool docstrings with the granted
+        # command index. Without this call the module keeps its permissive
+        # default ('*'), so '--tools minishell:read' would not be read-only.
+        if hasattr(mod, "configure"):
+            granted_caps = set(permission_map[modname].keys())
+            if "all" in granted_caps:
+                granted_caps = {"*"}   # wildcard grant: module may do everything
+            mod.configure(frozenset(granted_caps), args.engine)
+            logger.debug("configured %s: caps=%s engine=%s",
+                         modname, sorted(granted_caps), args.engine)
         for name, obj in inspect.getmembers(mod, inspect.isfunction):
             if getattr(obj, "_is_toolex_tool", False):
                 TOOL_EXECUTION_MAP[_qualified_tool_name(modname, name)] = mod
 
-    TOOLS = build_tools_from_modules(MODS_LIST, permission_map)
+    try:
+        TOOLS = build_tools_from_modules(MODS_LIST, permission_map)
+    except ValueError as e:
+        logger.error("Invalid tool permissions: %s", e)
+        sys.exit(2)
     logger.debug("exposing %d tools: %s", len(TOOLS), [t["function"]["name"] for t in TOOLS])
 
     if args.tools and not TOOLS:
         logger.error("No tools resolved from --tools %s; refusing to run.", args.tools)
         sys.exit(2)
+
+    # Step 5: inject a one-line session preamble as the first system message.
+    preamble = _build_session_preamble(permission_map)
+    if preamble:
+        messages.insert(0, {"role": "system", "content": preamble})
+        logger.debug("session preamble: %s", preamble)
 
     executed_states = set()
 
@@ -325,15 +426,24 @@ def main(args):
                     has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
                     exec_args = kwargs if has_var_kw else {k: v for k, v in kwargs.items() if k in sig.parameters}
 
-                    # Validate string arguments against allowed glob patterns
-                    if "*" not in allowed_patterns_for_this_call:
-                        for arg_name, arg_val in exec_args.items():
-                            if isinstance(arg_val, str):
-                                if not any(fnmatch.fnmatch(arg_val, pat) for pat in allowed_patterns_for_this_call):
-                                    raise PermissionError(
-                                        f"Access Denied: argument {arg_name}={arg_val!r} "
-                                        f"does not match any allowed pattern {allowed_patterns_for_this_call}"
-                                    )
+                    # Validate ONLY path-designated arguments against the allowed glob patterns.
+                    # Non-path strings (content, search_string, edit_instructions, command_line,
+                    # git args, …) pass through untouched.
+                    _path_args: frozenset = getattr(tool_func, "_path_args", frozenset())
+                    if "*" not in allowed_patterns_for_this_call and not _path_args:
+                        raise PermissionError(
+                            f"Access Denied: tool '{fn_name}' cannot enforce scoped path grants"
+                        )
+                    if "*" not in allowed_patterns_for_this_call and _path_args:
+                        for arg_name in _path_args & exec_args.keys():
+                            arg_val = exec_args[arg_name]
+                            if isinstance(arg_val, str) and not any(
+                                fnmatch.fnmatch(arg_val, pat) for pat in allowed_patterns_for_this_call
+                            ):
+                                raise PermissionError(
+                                    f"Access Denied: argument {arg_name}={arg_val!r} "
+                                    f"does not match any allowed pattern {allowed_patterns_for_this_call}"
+                                )
 
                     result = execute_tool(mod_obj, orig_func_name, **exec_args)
                 except Exception as e:
@@ -342,8 +452,7 @@ def main(args):
                     messages.append({"role": "tool", "tool_call_id": call["id"], "content": error_payload})
                     continue
 
-                if not isinstance(result, (dict, list, str, int, float, bool)):
-                    result = {"result": str(result)}
+                result = _serialize_result(result)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call["id"],
@@ -365,6 +474,8 @@ if __name__ == "__main__":
     parser.add_argument("--tools", action="append", default=[], help="Permission spec (repeatable)", metavar="SPEC")
     parser.add_argument("--log-level", type=str, choices=["DEBUG","INFO","WARNING","ERROR"], default="INFO")
     parser.add_argument("--workspace-dir", type=str, default=None)
+    parser.add_argument("--engine", choices=["host", "podman"], default="host",
+                        help="Execution engine for modules with a configure() hook (minishell)")
     parser.add_argument("--drop-tool-reasoning", action="store_true")
     parser.add_argument("--total-iterations", type=int, default=30)
     args = parser.parse_args()
@@ -373,4 +484,3 @@ if __name__ == "__main__":
         main(args)
     except KeyboardInterrupt:
         sys.exit(1)
-
