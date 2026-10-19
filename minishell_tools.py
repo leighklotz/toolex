@@ -29,7 +29,6 @@ from __future__ import annotations
 import glob
 import inspect
 import os
-import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -201,8 +200,10 @@ class PodmanRunner:
     def run(self, argv, stdin, caps) -> CommandResult:
         mount = "rw" if "write" in caps else "ro"
         cmd = ["podman", "run", "--rm", "--net=none", "--workdir", "/workspace",
-               "-v", f"{SANDBOX_CONFIG['host_data_dir']}:/workspace:{mount}",
-               SANDBOX_CONFIG["image"], *argv]
+               "-v", f"{SANDBOX_CONFIG['host_data_dir']}:/workspace:{mount}"]
+        if stdin is not None:
+            cmd.append("--interactive")
+        cmd.extend([SANDBOX_CONFIG["image"], *argv])
         kw = dict(capture_output=True, text=True, timeout=_TIMEOUT)
         if stdin is None:
             kw["stdin"] = subprocess.DEVNULL
@@ -239,15 +240,81 @@ def _guard_find(rest):
 
 
 def _guard_sed(rest):
-    # '*' catches attached forms: sed -i.bak
-    _reject(rest, {"-i", "-i*", "--in-place", "--in-place*"},
-            "sed -i is disabled (use patch)")
+    i = 0
+    while i < len(rest):
+        token = rest[i]
+        if token == "--":
+            break
+        if token.startswith("--"):
+            option = token.split("=", 1)[0]
+            if option != "--" and "--in-place".startswith(option):
+                raise ValueError(f"sed -i is disabled (use patch): {token}")
+        if token.startswith("-") and not token.startswith("--") and token != "-":
+            group = token[1:]
+            for j, option in enumerate(group):
+                if option == "i":
+                    raise ValueError(f"sed -i is disabled (use patch): {token}")
+                if option in {"e", "f", "l"}:
+                    if j == len(group) - 1:
+                        i += 1
+                    break
+        i += 1
 
 
 def _guard_sort(rest):
-    # '*' catches attached forms: sort -ofile
-    _reject(rest, {"-o", "-o*", "--output", "--output*"},
-            "sort -o is disabled (use | tee <file>)")
+    i = 0
+    while i < len(rest):
+        token = rest[i]
+        if token == "--":
+            break
+        if token.startswith("--"):
+            option = token.split("=", 1)[0]
+            if option != "--" and any(
+                dangerous.startswith(option)
+                for dangerous in {"--output", "--compress-program"}
+            ):
+                if "--output".startswith(option):
+                    raise ValueError("sort -o is disabled (use | tee <file>)")
+                raise ValueError("sort --compress-program is disabled")
+        elif token.startswith("-") and token != "-":
+            group = token[1:]
+            j = 0
+            while j < len(group):
+                option = group[j]
+                if option == "o":
+                    raise ValueError("sort -o is disabled (use | tee <file>)")
+                if option in {"k", "t", "T", "S"}:
+                    if j == len(group) - 1:
+                        i += 1
+                    break
+                j += 1
+        i += 1
+
+
+def _guard_uniq(rest):
+    operands = []
+    i = 0
+    options = True
+    while i < len(rest):
+        token = rest[i]
+        if options and token == "--":
+            options = False
+        elif options and token.startswith("--"):
+            option = token.split("=", 1)[0]
+            if option in {"--skip-fields", "--skip-chars", "--check-chars"} and "=" not in token:
+                i += 1
+        elif options and token.startswith("-") and token != "-":
+            group = token[1:]
+            for j, option in enumerate(group):
+                if option in {"f", "s", "w"}:
+                    if j == len(group) - 1:
+                        i += 1
+                    break
+        else:
+            operands.append(token)
+            if len(operands) > 1:
+                raise ValueError("uniq output operands are disabled (read-only command)")
+        i += 1
 
 
 def _guard_date(rest):
@@ -339,7 +406,8 @@ def _wc(args: str = "", stdin: str | None = None) -> CommandResult:
     raise NotImplementedError
 
 
-@command("uniq", doc="Report or omit repeated lines (input should be sorted).", consumes_stdin=True)
+@command("uniq", doc="Report or omit repeated lines (input should be sorted; output files are disabled).",
+         consumes_stdin=True, validate=_guard_uniq)
 def _uniq(args: str = "", stdin: str | None = None) -> CommandResult:
     raise NotImplementedError
 
@@ -424,7 +492,9 @@ def _printf(args: list[str] | None = None, stdin: str | None = None) -> CommandR
                 if conv == "%":
                     out.append("%")
                 elif conv in "sd":
-                    out.append(str(vals[vi])); vi += 1
+                    value = vals[vi]
+                    out.append(str(int(value)) if conv == "d" else value)
+                    vi += 1
                 elif conv == "f":
                     out.append(f"{float(vals[vi]):f}"); vi += 1
                 else:
@@ -480,22 +550,98 @@ def _glob_ws(pattern: str) -> list[str]:
     return [os.path.relpath(h, _WORKSPACE) for h in hits]
 
 
-def _split(line: str) -> list[str]:
-    tokens = shlex.split(line, posix=True)   # quote-aware — a whitespace split would break 'grep "a|b" f'
+def _lex(line: str) -> list[tuple[str, tuple[bool, ...]]]:
+    tokens, chars, protected = [], [], []
+    quote = None
+    escaped = False
+    escaped_in_double = False
+    started = False
+
+    def finish():
+        nonlocal chars, protected, started
+        if started:
+            tokens.append(("".join(chars), tuple(protected)))
+            chars, protected, started = [], [], False
+
+    for char in line:
+        if escaped:
+            if escaped_in_double and char not in {'"', "\\"}:
+                chars.append("\\")
+                protected.append(True)
+            chars.append(char)
+            protected.append(True)
+            escaped = False
+            escaped_in_double = False
+            continue
+        if quote == "'":
+            if char == "'":
+                quote = None
+            else:
+                chars.append(char)
+                protected.append(True)
+            continue
+        if quote == '"':
+            if char == '"':
+                quote = None
+            elif char == "\\":
+                escaped = True
+                escaped_in_double = True
+            else:
+                chars.append(char)
+                protected.append(True)
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            started = True
+        elif char == "\\":
+            escaped = True
+            started = True
+        elif char.isspace():
+            finish()
+        else:
+            chars.append(char)
+            protected.append(False)
+            started = True
+
+    if escaped:
+        raise ValueError("No escaped character")
+    if quote is not None:
+        raise ValueError("No closing quotation")
+    finish()
+    return tokens
+
+
+def _split_tokens(line: str) -> list[tuple[str, bool]]:
+    tokens = _lex(line)
     out, prev = [], None
-    for t in tokens:                         # bash-like glob expansion
+    for t, protected in tokens:
+        # Expansion is clamped to workspace-relative tokens. Quoted or escaped
+        # glob metacharacters are escaped in the glob pattern.
+        operator = not any(protected) and t in (_UNSUPPORTED | {"|"})
         # Expansion is clamped to workspace-RELATIVE tokens: under PodmanRunner,
         # expanding an absolute glob like /etc/* would match on the HOST
         # filesystem, not inside the container. Absolute glob tokens pass
         # through literally and the command reports them as missing — safe and
         # self-explaining.
+        pattern = "".join(
+            "\\" + char if quoted and char in "*?[\\" else char
+            for char, quoted in zip(t, protected)
+        )
+        has_unquoted_glob = any(
+            not quoted and char in "*?["
+            for char, quoted in zip(t, protected)
+        )
         if (prev not in _PATTERN_FLAGS and not t.startswith("/")
-                and any(c in t for c in "*?[")):
-            out.extend(sorted(_glob_ws(t)) or [t])   # no match → literal, bash-style
+                and has_unquoted_glob):
+            out.extend((match, False) for match in sorted(_glob_ws(pattern)) or [t])
         else:
-            out.append(t)
+            out.append((t, operator))
         prev = t
     return out
+
+
+def _split(line: str) -> list[str]:
+    return [token for token, _ in _split_tokens(line)]
 
 
 def _has_file_operand(rest, spec: CommandSpec) -> bool:
@@ -517,7 +663,7 @@ def _call(func, args, stdin) -> CommandResult:
 
 
 class MiniShell:
-    """Pipe-only interpreter: shlex tokenization, '|' stage splitting,
+    """Pipe-only interpreter: quote-aware tokenization, '|' stage splitting,
     per-stage dispatch through CommandSpecs, fail-fast error reporting."""
 
     def __init__(self, registry, runner, granted):
@@ -527,14 +673,14 @@ class MiniShell:
 
     def execute(self, line: str) -> CommandResult:
         try:
-            tokens = _split(line)
+            tokens = _split_tokens(line)
         except ValueError as e:
             return CommandResult("", f"shell syntax error: {e}", 2)
         stages, cur = [], []
-        for t in tokens:
-            if t == "|":
+        for t, operator in tokens:
+            if operator and t == "|":
                 stages.append(cur); cur = []
-            elif t in _UNSUPPORTED:
+            elif operator and t in _UNSUPPORTED:
                 return CommandResult("", f"'{t}' is not supported (pipes only); "
                                          f"split the work into multiple shell calls", 2)
             else:
@@ -605,7 +751,7 @@ def configure(granted, engine: str = "host"):
     _runner = PodmanRunner() if engine == "podman" else HostRunner()
     denied = sorted(s.name for s in _REGISTRY._by_name.values()
                     if not _allowed(s, _GRANTED))
-    mode = "read-only" if "write" not in _GRANTED else "read+write"
+    mode = "read-only" if not ({"write", "*"} & _GRANTED) else "read+write"
     shell.__doc__ = (shell.__doc__ or "").rstrip() + (
         f"\n\nPermission mode: {mode}."
         + (f" Disabled this session: {', '.join(denied)}." if denied else "")
@@ -633,8 +779,8 @@ def shell(
 
     Semantics: '|' is the only separator — ';', '&&', '||', redirects, and
     subshells are rejected (exit 2) with instructions to split the work into
-    multiple shell calls. Tokenization is shlex-based, so an unspaced pipe
-    reads as one unknown token (exit 127): put spaces around '|'. Fail-fast:
+    multiple shell calls. An unspaced pipe within a token remains part of that
+    token (exit 127): put spaces around '|'. Fail-fast:
     the first non-zero stage ends the pipeline and the error names the stage
     and command — a deliberate divergence from bash's last-command exit
     status. Unknown commands exit 127 with a hint to run 'help'; permission

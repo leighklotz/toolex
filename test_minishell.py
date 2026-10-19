@@ -74,7 +74,7 @@ def run_line(line, granted=WILD, results=None):
 
 def names_in(index_text):
     """Command names from an index blob ('name — doc' lines; no doc contains ' — ')."""
-    return {ln.split(" — ", 1)[0] for ln in index_text.splitlines() if ln.strip()}
+    return {ln.split(" — ", 1)[0] for ln in index_text.splitlines() if " — " in ln}
 
 
 @pytest.fixture
@@ -135,6 +135,14 @@ def test_quoted_pipe_is_one_stage():
                          results=[minishell_tools.CommandResult("m\n", "", 0)])
     assert res.exit_code == 0
     assert fake.calls == [(["grep", "a|b", "file.txt"], None, frozenset({"read"}))]
+
+
+def test_quoted_operators_and_wildcards_are_literal(ws):
+    res, fake = run_line("echo '|'")
+    assert res.stdout == "|\n" and fake.calls == []
+    assert minishell_tools._split("echo '*.py'") == ["echo", "*.py"]
+    res, fake = run_line("echo '*.py'")
+    assert res.stdout == "*.py\n" and fake.calls == []
 
 
 def test_glob_expands_sorted(ws):
@@ -238,7 +246,7 @@ def test_index_limit_hint_and_unlimited():
     assert "whoami" not in trunc                       # only the first 10 chars survived
     full = reg.index(WILD, limit=None)
     assert full == reg.index(WILD, limit=10 ** 6)      # unlimited == effectively-unlimited
-    assert len(full.splitlines()) == 28
+    assert len(names_in(full)) == 28
 
 
 def test_duplicate_name_raises_at_register():
@@ -304,20 +312,34 @@ def test_write_denied_under_read_grant(line, msg):
     ("find x -exec rm {}", "destructive find predicates"),
     ("find x -execdir rm {}", "destructive find predicates"),
     ("find . -ok rm {}", "destructive find predicates"),
+    ("find . -fprint0 out.txt", "destructive find predicates"),
     ("sed -i s/a/b/ f.txt", "sed -i is disabled"),
     ("sed -i.bak s/a/b/ f.txt", "sed -i is disabled"),
+    ("sed -ni 's/a/b/p' input.txt", "sed -i is disabled"),
     ("sed --in-place s/a/b/ f.txt", "sed -i is disabled"),
     ("sort -o out.txt", "sort -o is disabled"),
     ("sort -ofile.txt", "sort -o is disabled"),
+    ("sort -ro output.txt input.txt", "sort -o is disabled"),
     ("sort --output out.txt", "sort -o is disabled"),
+    ("sort --compress-program=cat", "sort --compress-program is disabled"),
+    ("sort --compress-program cat", "sort --compress-program is disabled"),
     ("date -s 2024-01-01", "date -s is disabled"),
     ("date --set=2024-01-01", "date -s is disabled"),
+    ("uniq input.txt output.txt", "uniq output operands are disabled"),
+    ("uniq - output.txt", "uniq output operands are disabled"),
 ])
 def test_validators_block_destructive_flags(line, frag):
     res, fake = run_line(line)
     assert res.exit_code == 1
     assert frag in res.stderr
     assert fake.calls == []
+
+
+def test_sed_option_argument_is_not_misread_as_in_place_flag():
+    res, fake = run_line("sed -e 's/a/i/' file.txt",
+                         results=[minishell_tools.CommandResult("ok\n", "", 0)])
+    assert res.exit_code == 0
+    assert fake.calls[0][0] == ["sed", "--sandbox", "-e", "s/a/i/", "file.txt"]
 
 
 def test_validator_passthrough_and_caps_flow():
@@ -372,7 +394,7 @@ def test_help_untruncated_matches_registry():
     assert res.exit_code == 0
     assert fake.calls == []                              # native — no fork
     assert res.stdout == minishell_tools._REGISTRY.index(minishell_tools._GRANTED, limit=None) + "\n"
-    assert len(res.stdout.splitlines()) == 28
+    assert len(names_in(res.stdout)) == 28
     assert "run 'help' for the full list" not in res.stdout
 
 
@@ -443,6 +465,12 @@ def test_printf_missing_argument():
     res, _ = run_line(r"printf '%d %d' 1")
     assert res.exit_code == 1
     assert "not enough arguments" in res.stderr
+
+
+def test_printf_integer_conversion_rejects_non_numeric():
+    res, _ = run_line("printf '%d' abc")
+    assert res.exit_code == 1
+    assert "invalid literal" in res.stderr
 
 
 def test_caps_flow_from_spec_and_piped_stdin_reaches_runner():
@@ -517,6 +545,15 @@ def test_podman_runner_isolation_contract(tmp_path, monkeypatch, fake_proc, caps
     assert r.stdout == "OUT" and r.exit_code == 0
 
 
+def test_podman_runner_attaches_piped_stdin(tmp_path, monkeypatch, fake_proc):
+    log, _ = fake_proc
+    monkeypatch.setitem(minishell_tools.SANDBOX_CONFIG, "host_data_dir", str(tmp_path))
+    minishell_tools.PodmanRunner().run(["tee", "out.txt"], "hello", frozenset({"write"}))
+    assert "--interactive" in log["argv"]
+    assert "-t" not in log["argv"] and "--tty" not in log["argv"]
+    assert log["kw"]["input"] == "hello"
+
+
 # ---------------------------------------------------------------------------
 # e2e: real sed over a tmp workspace, read grant (needs sed on PATH)
 # ---------------------------------------------------------------------------
@@ -554,7 +591,7 @@ def test_sed_sandbox_keeps_normal_edits(tmp_path, monkeypatch):
     res = _read_grant_shell().execute("sed 's/b/B/g' in.txt")
     assert res.exit_code == 0 and res.stdout == "aBc\n"
     res = _read_grant_shell().execute("printf abc | sed 's/b/B/'")
-    assert res.exit_code == 0 and res.stdout == "aBc\n"
+    assert res.exit_code == 0 and res.stdout == "aBc"
 
 
 def test_sed_argv_pinned_before_user_tokens():
@@ -586,6 +623,7 @@ def test_configure_rewrites_shell_docstring(fresh):
     assert "Available commands:" not in fresh.shell.__doc__
     fresh.configure(frozenset({"*"}), engine="host")
     assert "Available commands:" in fresh.shell.__doc__
+    assert "Permission mode: read+write." in fresh.shell.__doc__
 
 
 def test_command_index_helper_matches_registry(fresh):
@@ -650,8 +688,7 @@ def test_real_schema_generator_sees_configured_index(fresh):
 
 
 # ---------------------------------------------------------------------------
-# toolex (unit) — commit-3 contract, xfail(strict=True) until wired.
-# On commit 3 these XPASS and the suite FAILS: remove the markers then.
+# toolex (unit)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.xfail(strict=True, reason="wired in commit 3 (adapted §7.1: spec-cap vocabulary)")
@@ -666,8 +703,31 @@ def test_toolex_parse_permissions_collects_spec_caps():
     assert set(toolex.parse_permissions(["minishell"])["minishell_tools"]) == {"read", "write"}
 
 
-@pytest.mark.xfail(strict=True, reason="wired in commit 3 (_serialize_result seam for to_payload)")
 def test_toolex_serialization_duck_types_to_payload():
     toolex = pytest.importorskip("toolex")
     payload = toolex._serialize_result(minishell_tools.CommandResult("s", "e", 3))
     assert payload == {"stdout": "s", "stderr": "e", "exit_code": 3}
+
+
+@pytest.mark.parametrize("module,permissions", [
+    (minishell_tools, {"minishell_tools": {"read": ["allowed.txt"]}}),
+    (types.SimpleNamespace(__name__="bash_tools"), {"bash_tools": {"read": ["allowed.txt"]}}),
+])
+def test_toolex_rejects_scoped_grants_without_path_metadata(module, permissions):
+    toolex = pytest.importorskip("toolex")
+    if not hasattr(module, "shell"):
+        def get_cat():
+            pass
+        get_cat._is_toolex_tool = True
+        get_cat._required_caps = {"read"}
+        module.get_cat = get_cat
+    with pytest.raises(ValueError, match="cannot enforce scoped path grants"):
+        toolex.build_tools_from_modules([module], permissions)
+
+
+def test_toolex_preamble_labels_wildcard_minishell_write_access():
+    toolex = pytest.importorskip("toolex")
+    preamble = toolex._build_session_preamble({"minishell_tools": {"*": ["*"]}})
+    assert "shell: read+write" in preamble
+    read_only = toolex._build_session_preamble({"minishell_tools": {"read": ["*"]}})
+    assert "shell: read-only" in read_only

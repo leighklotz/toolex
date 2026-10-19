@@ -189,17 +189,25 @@ def build_tools_from_modules(modules: List[Any], permission_map: Dict[str, Dict[
                     can_use = True
 
                 if can_use:
-                    schema = generate_openai_schema(obj)
                     qualified_name = _qualified_tool_name(modname, name)
-                    schema["function"]["name"] = qualified_name
 
                     # Per-operation imperative permission line (step 4).
                     # Only tools with path_args get a file-pattern sentence;
                     # tools without path_args (e.g. minishell shell) rely on
                     # the permission banner already embedded in their docstring.
                     path_args = getattr(obj, "_path_args", frozenset())
+                    scoped_patterns = [
+                        pattern for cap in required_caps
+                        for pattern in user_caps.get(cap, [])
+                    ]
+                    if scoped_patterns and "*" not in scoped_patterns and not path_args:
+                        raise ValueError(
+                            f"Tool '{qualified_name}' cannot enforce scoped path grants"
+                        )
+                    schema = generate_openai_schema(obj)
+                    schema["function"]["name"] = qualified_name
                     if path_args:
-                        pats = [p for cap in required_caps for p in user_caps.get(cap, [])]
+                        pats = scoped_patterns
                         if not pats:
                             pats = ["*"]
                         if required_caps & _MUTATING_CAPS:
@@ -226,6 +234,17 @@ def execute_tool(mod_obj, func_name, *args, **kwargs):
     except Exception as exc:
         raise RuntimeError(f"Execution of {func_name} failed: {exc}") from exc
 
+
+def _serialize_result(result):
+    """Serialize structured tool results while preserving the legacy fallback."""
+    to_payload = getattr(result, "to_payload", None)
+    if callable(to_payload):
+        return to_payload()
+    if isinstance(result, (dict, list, str, int, float, bool)):
+        return result
+    return {"result": str(result)}
+
+
 def find_module_for_func(mod_registry, func_name):
     if func_name in mod_registry: return mod_registry[func_name]
     raise ValueError(f"Tool function {func_name} not found.")
@@ -241,7 +260,7 @@ def _build_session_preamble(permission_map: Dict[str, Dict[str, List[str]]]) -> 
     for modname, caps in sorted(permission_map.items()):
         short = modname[:-6] if modname.endswith("_tools") else modname
         if short == "minishell":
-            if "all" in caps:
+            if "all" in caps or "*" in caps:
                 mode = "read+write"
             elif "write" in caps:
                 mode = "read+write"
@@ -309,7 +328,11 @@ def main(args):
             if getattr(obj, "_is_toolex_tool", False):
                 TOOL_EXECUTION_MAP[_qualified_tool_name(modname, name)] = mod
 
-    TOOLS = build_tools_from_modules(MODS_LIST, permission_map)
+    try:
+        TOOLS = build_tools_from_modules(MODS_LIST, permission_map)
+    except ValueError as e:
+        logger.error("Invalid tool permissions: %s", e)
+        sys.exit(2)
     logger.debug("exposing %d tools: %s", len(TOOLS), [t["function"]["name"] for t in TOOLS])
 
     if args.tools and not TOOLS:
@@ -407,6 +430,10 @@ def main(args):
                     # Non-path strings (content, search_string, edit_instructions, command_line,
                     # git args, …) pass through untouched.
                     _path_args: frozenset = getattr(tool_func, "_path_args", frozenset())
+                    if "*" not in allowed_patterns_for_this_call and not _path_args:
+                        raise PermissionError(
+                            f"Access Denied: tool '{fn_name}' cannot enforce scoped path grants"
+                        )
                     if "*" not in allowed_patterns_for_this_call and _path_args:
                         for arg_name in _path_args & exec_args.keys():
                             arg_val = exec_args[arg_name]
@@ -425,8 +452,7 @@ def main(args):
                     messages.append({"role": "tool", "tool_call_id": call["id"], "content": error_payload})
                     continue
 
-                if not isinstance(result, (dict, list, str, int, float, bool)):
-                    result = {"result": str(result)}
+                result = _serialize_result(result)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call["id"],
