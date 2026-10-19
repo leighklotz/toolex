@@ -234,7 +234,7 @@ def _guard_find(rest):
     # 100 KB truncation, and the predicate ban below. Denying '.' outright
     # would break the single most common invocation, find . -name '*.py'.
     _reject(rest, {"-delete", "-exec", "-execdir", "-ok", "-okdir",
-                   "-fprint", "-fprintf", "-fls"},
+                   "-fprint", "-fprint0", "-fprintf", "-fls"},
             "destructive find predicates are disabled (modify files with patch)")
 
 
