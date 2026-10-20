@@ -29,6 +29,7 @@ from __future__ import annotations
 import glob
 import inspect
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -174,10 +175,25 @@ class CommandRegistry:
 _TIMEOUT = 60  # seconds; a hung stage (tail -f, find on a huge tree) must not stall the agent loop
 
 
+def _apply_redirects(res: CommandResult, redirects: dict[int, object]) -> CommandResult:
+    if not redirects:
+        return res
+    out, err = res.stdout, res.stderr
+    if redirects.get(1) == "devnull":
+        out = ""
+    if redirects.get(2) == "devnull":
+        err = ""
+    if redirects.get(2) == 1:
+        out, err = out + err, ""
+    if redirects.get(1) == 2:
+        out, err = "", err + out
+    return CommandResult(out, err, res.exit_code)
+
+
 class HostRunner:
     """Direct execution on the host, cwd pinned to the workspace."""
 
-    def run(self, argv, stdin, caps) -> CommandResult:
+    def run(self, argv, stdin, caps, redirects=None) -> CommandResult:
         kw = dict(capture_output=True, text=True,
                   cwd=SANDBOX_CONFIG["host_data_dir"], timeout=_TIMEOUT)
         if stdin is None:
@@ -186,7 +202,7 @@ class HostRunner:
             kw["input"] = stdin
         try:
             p = subprocess.run(argv, **kw)
-            return CommandResult(p.stdout, p.stderr, p.returncode)
+            return _apply_redirects(CommandResult(p.stdout, p.stderr, p.returncode), redirects)
         except subprocess.TimeoutExpired:
             return CommandResult("", f"timed out after {_TIMEOUT}s", 124)
         except Exception as e:
@@ -197,7 +213,7 @@ class PodmanRunner:
     """One throwaway container per stage: no network, ro mount unless the
     stage's caps include write."""
 
-    def run(self, argv, stdin, caps) -> CommandResult:
+    def run(self, argv, stdin, caps, redirects=None) -> CommandResult:
         mount = "rw" if "write" in caps else "ro"
         cmd = ["podman", "run", "--rm", "--net=none", "--workdir", "/workspace",
                "-v", f"{SANDBOX_CONFIG['host_data_dir']}:/workspace:{mount}"]
@@ -211,7 +227,7 @@ class PodmanRunner:
             kw["input"] = stdin
         try:
             p = subprocess.run(cmd, **kw)
-            return CommandResult(p.stdout, p.stderr, p.returncode)
+            return _apply_redirects(CommandResult(p.stdout, p.stderr, p.returncode), redirects)
         except subprocess.TimeoutExpired:
             return CommandResult("", f"timed out after {_TIMEOUT}s", 124)
         except Exception as e:
@@ -534,9 +550,49 @@ def _tee(args: str = "", stdin: str | None = None) -> CommandResult:
 # Interpreter
 # ===========================================================================
 
-_UNSUPPORTED = {">", "<", ">>", "&&", "||", ";", "(", ")", "&", "`", "|&"}
+_UNSUPPORTED = {"<", ">>", "&&", "||", ";", "(", ")", "&", "`", "|&"}
 _PATTERN_FLAGS = {"-name", "-iname", "-path", "-ipath", "-regex", "-wholename"}
 _WORKSPACE = SANDBOX_CONFIG["host_data_dir"]
+
+_REDIRECT_RE = re.compile(r'^(\d?)(>)(/dev/null|&[12])$')
+_SEP_REDIRECT_RE = re.compile(r'^([12]?)>$')
+_SEP_REDIRECT_TARGETS = {"/dev/null", "&1", "&2"}
+
+
+def _parse_redirect(token: str):
+    m = _REDIRECT_RE.match(token)
+    if not m:
+        return None
+    fd = int(m.group(1)) if m.group(1) else 1
+    tgt = m.group(3)
+    if tgt == "/dev/null":
+        return (fd, "devnull")
+    return (fd, int(tgt[1]))
+
+
+def _extract_redirects(rest: list[str]) -> tuple[list[str], dict[int, object]]:
+    redirects: dict[int, object] = {}
+    filtered = []
+    i = 0
+    while i < len(rest):
+        tok = rest[i]
+        r = _parse_redirect(tok)
+        if r is not None:
+            redirects[r[0]] = r[1]
+        else:
+            m = _SEP_REDIRECT_RE.match(tok)
+            if m and i + 1 < len(rest) and rest[i + 1] in _SEP_REDIRECT_TARGETS:
+                fd = int(m.group(1)) if m.group(1) else 1
+                tgt = rest[i + 1]
+                if tgt == "/dev/null":
+                    redirects[fd] = "devnull"
+                else:
+                    redirects[fd] = int(tgt[1])
+                i += 1
+            else:
+                filtered.append(tok)
+        i += 1
+    return filtered, redirects
 
 
 def _glob_ws(pattern: str) -> list[str]:
@@ -706,13 +762,14 @@ class MiniShell:
                     spec.validate(rest)
                 except ValueError as e:
                     return CommandResult("", f"{name}: {e}", 1)
+            rest, redirects = _extract_redirects(rest)
             if spec.native:
                 res = _call(spec.func, rest, buffer)
             else:
                 if spec.consumes_stdin and buffer is None and not _has_file_operand(rest, spec):
                     return CommandResult("", f"{name} reads stdin; give it file arguments "
                                              f"or pipe something into it", 1)
-                res = self._runner.run([*spec.argv, *rest], buffer, spec.caps)
+                res = self._runner.run([*spec.argv, *rest], buffer, spec.caps, redirects)
             if not res.is_success:
                 return CommandResult(res.stdout,
                                      f"pipeline stage {i} ({name}) failed, exit {res.exit_code}\n{res.stderr}",
@@ -768,7 +825,7 @@ def shell(
         str,
         "A minishell command line. Join stages with ' | ' — put spaces around the "
         "pipe ('a|b' reads as one token and fails). Quotes are honored. "
-        "Only pipes are supported — no ';', '&&', or redirects. "
+        "Only pipes are supported — no ';', '&&', or file-redirects. "
         "The full command index is in this description; 'help' re-prints it at runtime.",
     ] = "",
 ) -> CommandResult:
@@ -777,11 +834,11 @@ def shell(
     Pipes only; the pipeline stops at the first failing stage. Available
     commands are listed below (also available at runtime via 'help').
 
-    Semantics: '|' is the only separator — ';', '&&', '||', redirects, and
+    Semantics: '|' is the only separator — ';', '&&', '||', file-redirects, and
     subshells are rejected (exit 2) with instructions to split the work into
-    multiple shell calls. An unspaced pipe within a token remains part of that
-    token (exit 127): put spaces around '|'. Fail-fast:
-    the first non-zero stage ends the pipeline and the error names the stage
+    multiple shell calls. The exceptions are `> /dev/null`, `2>/dev/null`, and `2>&1`.
+    An unspaced pipe within a token remains part of that token (exit 127): put spaces around '|'.
+    Fail-fast: the first non-zero stage ends the pipeline and the error names the stage
     and command — a deliberate divergence from bash's last-command exit
     status. Unknown commands exit 127 with a hint to run 'help'; permission
     denials exit 126; syntax errors exit 2; timeouts exit 124. A command that
