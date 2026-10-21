@@ -167,3 +167,21 @@ def discover_tools(namespace: Dict[str, Any], module_name: str) -> List[str]:
         if getattr(obj, "_is_toolex_tool", False) 
         and getattr(obj, "__module__", None) == module_name
     ]
+
+# --- EVENG LOGGING ---
+def emit_invocation(tool_icon: str, **kwargs) -> None:
+    """Print one text fragment to stderr:  🤖<icon> key="val" key2="val2"
+    Strings are double-quoted; bools become true/false; everything else is repr'd.
+    """
+    robot = "🤖"
+    parts = []
+    for k, v in kwargs.items():
+        if isinstance(v, str):
+            parts.append(f'{k}="{v}"')
+        elif isinstance(v, bool):
+            parts.append(f"{k}={'true' if v else 'false'}")
+        else:
+            parts.append(f"{k}={v!r}")
+    line = f"{robot}{tool_icon} {' '.join(parts)}"
+    print(line, file=sys.stderr, flush=True, end='')
+
