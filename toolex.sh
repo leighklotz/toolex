@@ -7,7 +7,7 @@ TOOLEX_PY=~/wip/toolex/toolex.py
 source "${HX_HOME}/bin/commands/hx-bootstrap.sh" && hx core
 
 export HX_MODEL=$(hx model)
-echo "HX_MODEL=$HX_MODEL" >&2
+#echo "HX_MODEL=$HX_MODEL" >&2
 
 if [ -f "${SCRIPT_DIR}/.venv/bin/activate" ]; then
     # Pip-style: Use the local virtual environment if it exists
