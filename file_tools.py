@@ -217,7 +217,7 @@ def search_files_anywhere(
 ) -> str:
     """Searches through multiple files matching a pattern and returns names of files containing the search string."""
     case_icon = "🔡" if case_insensitive else ""
-    emit_invocation(f"🔍{case_icon}" search_string=search_string, file_pattern=file_pattern)
+    emit_invocation(f"🔍{case_icon}", search_string=search_string, file_pattern=file_pattern)
     return _search_files_impl(file_pattern, search_string, case_insensitive,
                               check_fn=functools.partial(check_permitted_path, contain=False))
 @tool(capabilities="read", path_args=frozenset({"file_pattern"}))
