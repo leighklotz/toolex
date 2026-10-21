@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration constants
 VIA_API_CHAT_BASE = os.getenv("VIA_API_CHAT_BASE", "http://127.0.0.1:5000")
-MODEL = os.getenv("MODEL", 'gemma-4-26b-qat-batch')
+HX_MODEL = os.getenv("HX_MODEL", 'gemma-4-26b-qat-batch')
 URL = f"{VIA_API_CHAT_BASE}/v1/chat/completions"
 MAGIC_HEADER = "Content-Type: application/x-llm-history+json"
 TOOLS_INFERENCE_TIMEOUT=600
@@ -352,7 +352,7 @@ def main(args):
             print(MAGIC_HEADER); print(json.dumps(messages, default=str)); break
 
         try:
-            payload = {"model": MODEL, "messages": messages}
+            payload = {"model": HX_MODEL, "messages": messages}
             if TOOLS:
                 payload["tools"] = TOOLS
             if logger.isEnabledFor(logging.DEBUG):
