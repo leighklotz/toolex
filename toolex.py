@@ -54,7 +54,7 @@ def generate_openai_schema(obj):
         args = get_args(ann)
 
         # Extract Description from Annotated or Docstring fallback
-        description = p.name 
+        description = p.name
         if origin is Annotated and args:
             for item in args[1:]:
                 if isinstance(item, str):
@@ -63,7 +63,7 @@ def generate_openai_schema(obj):
 
         # Determine JSON Type mapping
         mapping = {str: "string", int: "integer", float: "number", bool: "boolean"}
-        
+
         if origin in (list, tuple, set) or (origin is None and hasattr(ann, '__origin__') and ann.__origin__ in (list, tuple, set)):
             json_type = "array"
             inner_type_obj = args[0] if args else str
@@ -88,8 +88,8 @@ def generate_openai_schema(obj):
             "name": obj.__name__,
             "description": (inspect.getdoc(obj) or "").strip(),
             "parameters": {
-                "type": "object", 
-                "properties": params, 
+                "type": "object",
+                "properties": params,
                 "required": required
             },
         },
@@ -178,8 +178,8 @@ def build_tools_from_modules(modules: List[Any], permission_map: Dict[str, Dict[
         for name, obj in inspect.getmembers(mod, inspect.isfunction):
             if getattr(obj, "_is_toolex_tool", False):
                 required_caps = getattr(obj, "_required_caps", {"read"})
-                
-                # A tool is visible if: 
+
+                # A tool is visible if:
                 # 1. User granted 'all' capability for this module OR
                 # 2. For every cap required by the tool, it exists in user permissions.
                 can_use = False
@@ -342,7 +342,20 @@ def main(args):
     # Step 5: inject a one-line session preamble as the first system message.
     preamble = _build_session_preamble(permission_map)
     if preamble:
-        messages.insert(0, {"role": "system", "content": preamble})
+        if messages and messages[0].get("role") == "system":
+            existing = messages[0].get("content", "")
+            if existing.startswith("Permissions — "):
+                # Re-piped history: replace the stale preamble we wrote on a
+                # previous invocation; keep whatever followed it.
+                parts = existing.split("\n", 1)
+                remainder = parts[1] if len(parts) > 1 else ""
+                messages[0]["content"] = preamble + "\n" + remainder if remainder else preamble
+            else:
+                # Fresh leading system message (e.g. help.sh persona):
+                # merge so we don't create two consecutive system messages.
+                messages[0]["content"] = preamble + "\n" + existing
+        else:
+            messages.insert(0, {"role": "system", "content": preamble})
         logger.debug("session preamble: %s", preamble)
 
     executed_states = set()
@@ -484,3 +497,4 @@ if __name__ == "__main__":
         main(args)
     except KeyboardInterrupt:
         sys.exit(1)
+        
