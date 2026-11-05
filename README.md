@@ -7,18 +7,17 @@
 ## Project layout
 
 ```text
-├─── bash_tools.py       # shell-related utilities (ls, pwd, command execution, etc.)
-├─── git_tools.py        # git-related tools (status, diff, merge, commit, etc.)
-├─── help-commit.sh      # Bash helper that asks the LLM to generate a commit command
-├─── toolex.py           # Thin client that talks to a local /v1/chat/completions endpoint
-├─── toolex.sh           # Convenience shell wrapper for `toolex.py`
-├─── tooling.py          # Decorator & CLI helpers used by all tools
-├─── weather_tools.py    # A duplicate of get_weather for demonstration
-├─── __init__.py
-└─── README.md           # ← you're here
+ ├── bash_tools.py        # shell utilities (ls, pwd, command execution, …)
+ ├── file_tools.py        # file read/write/edit/search with path-pattern grants
+ ├── git_tools.py         # git utilities (status, diff, commit, …)
+ ├── minishell_tools.py   # pipe-only mini shell exposed as one LLM tool
+ ├── test_minishell.py    # pytest suite for minishell + toolex integration
+ ├── toolex.py / toolex.sh
+ ├── tooling.py           # @tool decorator, host/podman runners, discover_tools
+ └── weather_tools.py
 ```
 
-* `tooling.py` – defines the `@tool` decorator and `run_tool` helper.
+* `tooling.py` – defines the `@tool` decorator helpers.
 * `bash_tools.py` – registers a handful of **shell** utilities (ls, pwd, cat, find, command execution, etc.).
 * `git_tools.py` – registers a handful of **git** utilities (status, diff, merge, commit, etc.).
 * `toolex.py` – parses CLI arguments, auto‑generates *OpenAI-style* tool schemas, sends a request to the `VIA_API_CHAT_BASE` (defaults to `http://127.0.0.1:5000/`), and orchestrates the tool calls.
@@ -39,7 +38,7 @@ uv sync
 ```bash
 mkvenv
 # Ensure you are in your virtual environment before proceeding
-source .venv/bin/activate 
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -48,19 +47,19 @@ pip install -r requirements.txt
 # Set the base URL for your local API provider
 export VIA_API_CHAT_BASE="http://127.0.0.1:5000"
 
-# Optional: Specify a specific model name (e.g., "gpt-4o", "llama3") 
-# if required by your local server implementation.
-export LM_MODEL="default"
+# Optional: the model name toolex sends with each request
+# (toolex defaults to "gemma-4-26b-qat-batch" when unset).
+export HX_MODEL="gpt-4o"
 ```
 
 ### 3. Run the client with a tool
 ```bash
-./toolex.py --tools git "What is the current status of the repository?"
+ask "What is the current status of the repository?" | tools git
 ```
 
 ### 4. Run the client with multiple tools
 ```bash
-./toolex.py --tools git weather "What is the ratio of git commits to current temperature in Paris?"
+ask "What is the ratio of git commits to current temperature in Paris?" | tools git weather
 ```
 
 The client will:
@@ -113,16 +112,20 @@ echo no changes
 
 | Argument | Description | Default |
 | :--- | :--- | :--- |
-| `--tools <module[:capability>=<pattern>...` | List of tools/modules to enable. You can restrict capabilities (e.g., `git:read`) or apply specific path allowances using the `=pattern` syntax (e.g., `file:read=/var/*`). Supports multiple patterns via comma-separation (e.g., `/var/*,/etc/*`). | None |
-| `--workspace-dir <path>` | Sets the working directory for podbash tools | Current dir / `$TOOLEX_WORKSPACE_DIR` |
+| `--tools <module[:capability>=<pattern>...]` | List of tools/modules to enable. You can restrict capabilities (e.g., `git:read`) or apply specific path allowances using the `=pattern` syntax (e.g., `file:read_anywhere=/var/*`). Supports multiple patterns via comma-separation (e.g., `/var/*,/etc/*`). | None |
+| `--workspace-dir <path>` | Sets the working directory for shell tools | Current dir / `$TOOLEX_WORKSPACE_DIR` |
+| `--engine {host,podman}` | Execution engine for modules with a `configure()` hook (minishell). Under podman, `write_anywhere` is rejected outright (`configure()` raises; toolex exits 2). An anywhere-**read** grant mounts the host root read-only at `/host` inside the container — prefix host paths with `/host`; `--engine host` is the expected pairing for anywhere grants. | host |
+| `--log-level {DEBUG,INFO,WARNING,ERROR}` | Logging verbosity. | `INFO` |
+| `--total-iterations <n>` | Maximum agentic tool-call rounds per run. | `30` |
+| `--drop-tool-reasoning` | Omit assistant `reasoning_content` from the piped conversation history. | off |
 
 ### Fine-Grained Permissions
 
-You can control exactly what tools an LLM can access and which files/directories are reachable using colon (`:`) and equal (`=`) syntax. 
+You can control exactly what tools an LLM can access and which files/directories are reachable using colon (`:`) and equal (`=`) syntax.
 
-Restrict a module to specific predefined capabilities defined in its implementation (e.g., `read`, `write`, or `all`). This is applied via the `--tools` flag.
+Restrict a module to specific predefined capabilities defined in its implementation (e.g., `read`, `write`, `edit`, or `all`). This is applied via the `--tools` flag.
 
-*   **Specific Capability:** `./toolex.py --tools git:read "Show me diff"` 
+*   **Specific Capability:** `./toolex.py --tools git:read "Show me diff"`
 *   **All Capabilities for a Module:** `./toolex.py --tools git:all "Commit this change"`
 
 For tools that interact with the filesystem, you can restrict access to specific paths or patterns using the `=pattern` syntax. This is particularly powerful for granting broad but controlled access via allowances.
@@ -132,12 +135,30 @@ For tools that interact with the filesystem, you can restrict access to specific
 | Intent | Syntax Example | Note |
 | :--- | :--- | :--- |
 | **Specific File** | `file:read=README.md` | Restricts the tool to only that single file. |
-| **Directory/Glob** | `file:read=/var/*` | Allows access to everything matching the pattern within a directory. |
-| **Multiple Patterns** | `file:read=/var/*,/etc/*` | Use commas to allow multiple distinct paths or patterns in one command. |
+| **Directory/Glob** | `file:read=doc/*.md` | Allows access to everything matching the pattern within a directory. |
+| **Multiple Patterns** | `file:read=doc/*.md,etc/*.conf` | Use commas to allow multiple distinct paths or patterns in one command. |
 
-> [!TIP]  
+| Capability | Scope | Meaning |
+| :--- | :--- | :--- |
+| `read` / `write` | workspace | Contained in `--workspace-dir`; patterns match workspace-relative paths |
+| `read_anywhere` / `write_anywhere` | host | Patterns match resolved absolute paths; dominates the scoped twin |
+| `edit` / `edit_anywhere` | workspace / host | Mutating like the write family; used by the file-edit tools |
+| `all` | both | Every capability at once, with the given patterns (the CLI's `all` is normalized to the `*` wildcard internally) |
+
+Patterns are matched case-sensitively with `fnmatch` semantics — `*` also matches `/`, so `*.py` matches `sub/b.py`. An empty pattern list (`module:read=`) denies every path: grants fail closed.
+
+> [!TIP]
 > When using shell-related tools with wildcards (e.g., `*.py`), always wrap your tool arguments in quotes (e.g., `--tools 'file:read=*.py'`) to prevent your local terminal from expanding the glob before it reaches `toolex`.
 
+### Session preamble
+
+Before the first model call, toolex prepends a one-line system message stating the effective grants, e.g.:
+
+```text
+Permissions — readable files: *.py; shell: read in the workdir (paths matching: *.py); no write.
+```
+
+When a previously generated history is piped back in, toolex replaces its own stale preamble in place instead of stacking a second one.
 
 ## Extending the system
 
@@ -161,6 +182,26 @@ For tools that interact with the filesystem, you can restrict access to specific
   ./toolex.py --tools bash:read --tools git:write "List files and then commit them"
   ```
 
+### Tool decorator options
+
+* `path_args` — frozenset of parameter names that are filesystem paths; toolex
+  validates only these against the granted patterns at call time.
+* `self_scoped=True` — for tools that enforce path grants inside their own
+  engine (e.g. minishell's interpreter). Exempt from toolex's "cannot enforce
+  scoped path grants" checks; capability checks still apply.
+* `cap_match` — `"all"` (default) requires every declared capability to be
+  granted for the tool to be visible; `"any"` requires at least one.
+
+
+### module configure() hook
+Modules exposing `configure()` receive the grant as a `{cap: [patterns]}` dict
+(the CLI's `all` is renamed to `*`) plus the `--engine` choice. A `ValueError`
+raised from `configure()` makes toolex exit 2. A legacy frozenset grant
+fail-closes to an empty grant — nothing is permitted. `configure()` runs
+before tool schemas are built, so it can also rewrite tool docstrings:
+minishell appends its permission banner and the granted command index to the
+`shell` description.
+
 ## Pipeline Mode (JSON)
 
 `toolex.py` is designed to be used within agentic pipelines via `stdin` and `stdout`. It can ingest an existing OpenAI-style message history in JSON format, resolve tool calls, and output the updated conversation array back to a pipe.
@@ -171,9 +212,37 @@ For tools that interact with the filesystem, you can restrict access to specific
 This allows for complex shell orchestration like:
 `ask "my prompt" | tools git --tools bash | answer`
 
+## minishell
+
+`minishell_tools` exposes exactly one `shell` tool over a pipe-only, 28-command mini shell (`ls`, `grep`, `sed`, `find`, `patch`, `tee`, …; run `help` for the index). Individual commands never surface as separate tools. The `shell` tool is visible under any grant that names at least one minishell capability (`cap_match="any"`), but per-stage dispatch still denies commands whose capabilities the grant does not cover (exit 126).
+
+```bash
+toolex.py --tools minishell                      # read-only, contained in the workdir
+toolex.py --tools 'minishell:read=*.py'          # read-only, only *.py paths
+toolex.py --tools minishell:read:write           # + tee/patch inside the workdir
+toolex.py --tools 'minishell:read:write=*.log'   # writes limited to *.log (tee/patch)
+toolex.py --tools minishell:read_anywhere        # host-wide read (see --engine caveats)
+toolex.py --tools minishell:read --engine podman
+```
+
+After `configure()`, the tool description carries a permission banner — the active mode and patterns, the disabled command list, engine notes — plus the granted command index; `help` re-prints the index at runtime with a `grant: …` header and the disabled list. toolex also opens the session with a one-line `Permissions — …` system message (see *Session preamble* above).
+
+Per-command validators disable flags that would touch unclassified paths or escape the grant — e.g. `sed -i`/`-f` (sed runs with `--sandbox` pinned, so `w`/`W`/`r`/`e` script side effects are blocked too), `grep -f`/`--exclude-from`, `diff -X`/`--from-file`, `file -f`, `sort -o`/`-T`/`--random-source`, `date -s`/`-f`, and destructive `find` predicates. The denial message names the offending flag.
+
+Each stage's path operands are classified per command (separately on the read and write side) and resolved symlink-safe before anything is dispatched. Scoped grants require workspace containment and match workspace-relative patterns; `*_anywhere` grants drop containment, dominate their scoped twin, and match resolved absolute paths. A denied path exits 126 and names the violated constraint (missing grant, containment, or pattern) plus the allowed patterns, so the model can self-correct.
+
+Under a **patterned** write grant, `patch` is stdin-only: its write targets come from the piped diff's `---`/`+++` headers (`-p1` stripped, `/dev/null` operands skipped), each target must be workdir-relative and match the write patterns, and retargeting options are banned — the argv is pinned to `patch -p1 --no-backup-if-mismatch --reject-file=/dev/null`. With an unpatterned (`*`) write grant no header parsing happens.
+
+Under `--engine podman`, each stage runs in a throwaway no-network container with the workspace mounted read-only (read-write only for write-cap stages). An anywhere-read grant additionally mounts the host root read-only at `/host` — prefix host paths with `/host` — and `write_anywhere` is rejected outright.
+
+Failure codes: validator denials exit 1, path/permission denials 126, unknown commands 127, syntax errors 2, timeouts 124. The pipeline stops at the first failing stage and the error names the stage and command.
+
+### Redirects
+Only `> /dev/null`, `2>/dev/null`, and `2>&1` are honored. Any other `>` target stays a literal argument — it can never become a hidden write channel — so file redirection remains unsupported until it can be gated on the write grant.
+
 ## `toolex.sh`
 
-Convenience wrapper for systems where the binary is installed in `~/wip/toolex`. All flags are forwarded to `toolex.py`.
+`toolex.sh` is a Convenience wrapper for systems where the binary is installed in `~/wip/toolex`. All flags are forwarded to `toolex.py`.
 
 ```bash
 ./toolex.sh --tools git "What's up?"

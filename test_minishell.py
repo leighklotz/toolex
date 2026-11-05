@@ -259,6 +259,7 @@ def test_stderr_redirects_reach_the_runner(line, redirect):
 
 
 def test_bare_gt_to_a_file_is_a_literal_token_not_a_redirect(ws):
+    # KEEP THIS IN PLACE UNTIL WE CAN SAFELY IMPLEMENT REDIRECTION.
     # R12 invariant: `> file` never becomes a hidden write channel — the
     # tokens pass through as ordinary arguments and no file is created.
     # (Any future `> file` support must route through PathGuard.check_write.)
