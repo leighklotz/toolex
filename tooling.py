@@ -23,9 +23,7 @@ SANDBOX_CONFIG = {
 # Logging
 logger = logging.getLogger(__name__)
 
-def tool(capabilities: Union[str, List[str], Callable] = None,
-         *,
-         path_args: Optional[frozenset[str]] = None):
+def tool(capabilities=None, *, path_args=None, self_scoped=False, cap_match: str = "all"):
     """
     Decorator that marks a function as an LLM-callable tool with specific permissions.
     Handles various calling styles for flexibility:
@@ -38,7 +36,19 @@ def tool(capabilities: Union[str, List[str], Callable] = None,
         Optional frozenset of parameter names that represent file-system paths
         (or glob patterns).  toolex.py's runtime enforcement validates *only*
         these arguments against the session's allowed glob patterns.  Omit for
-        tools whose parameters are never paths (e.g. shell, git).
+        tools whose parameters are never paths (e.g. git).
+
+    self_scoped:
+        True for tools that enforce the session's path grants inside their own
+        execution engine (e.g. minishell, whose interpreter validates every
+        stage's path operands before dispatch). Such tools are exempt from
+        toolex's "cannot enforce scoped path grants" checks at schema-build and
+        at call time; capability checks still apply.
+
+    cap_match:
+        "all" (default): the tool is visible when every capability in
+        _required_caps is granted. "any": visible when at least one is
+        granted (opt-in; minishell's shell uses it).
 
     The decorator also prepends a "Capabilities: …" header to the function's
     docstring so the OpenAI schema generator (which reads inspect.getdoc)
@@ -50,6 +60,8 @@ def tool(capabilities: Union[str, List[str], Callable] = None,
         func._is_toolex_tool = True
         func._required_caps = set()
         func._path_args = frozenset()
+        func._self_scoped = False
+        func._cap_match = "all"
         return func
 
     def decorator(f: Callable) -> Callable:
@@ -63,6 +75,8 @@ def tool(capabilities: Union[str, List[str], Callable] = None,
         f._is_toolex_tool = True
         f._required_caps = caps_set
         f._path_args = frozenset(path_args) if path_args else frozenset()
+        f._self_scoped = bool(self_scoped)
+        f._cap_match = cap_match if cap_match in ("all", "any") else "all"
 
         # Render the capability into the docstring so it appears in the
         # generated tool schema description — a uniform, machine-parseable
@@ -89,9 +103,9 @@ def bash_wrap(name: str, cmd: List[str]):
                 payload = args[0]
             elif "args" in kwargs:
                 payload = kwargs["args"]
-            
+
             arg_payload = str(payload).strip() if payload is not None else ""
-            
+
             print(f"🚀{' '.join(cmd)} {arg_payload}", file=sys.stderr, end='', flush=True)
             return run_bash_tool(name, cmd, arg_payload)
         return wrapper
@@ -104,9 +118,9 @@ def run_bash_tool(name: str, cmd: List[str], args: Optional[str] = "") -> Dict[s
 
     try:
         result = subprocess.run(
-            full_cmd, 
-            cwd=os.getcwd(), 
-            capture_output=True, 
+            full_cmd,
+            cwd=os.getcwd(),
+            capture_output=True,
             text=True,
             check=True
         )
@@ -115,7 +129,7 @@ def run_bash_tool(name: str, cmd: List[str], args: Optional[str] = "") -> Dict[s
         # CRITICAL FIX: Return the actual error from Git so the LLM knows WHY it failed.
         error_report = f"Command '{' '.join(full_cmd)}' exited with status {exc.returncode}.\nSTDERR: {exc.stderr.strip()}"
         return {name: error_report}
-    except Exception as exc: 
+    except Exception as exc:
         return {name: f"System Error: {str(exc)}"}
 
 # --- PODMAN SANDBOX ---
@@ -157,14 +171,14 @@ def run_podman_tool(name: str, base_cmd: List[str], args: str, caps: set) -> Dic
             return {name: result.stdout.strip()}
         else:
             return {name: f"Container Error (Exit {result.returncode}):\n{result.stderr.strip()}"}
-    except Exception as exc: 
+    except Exception as exc:
         return {name: f"Sandbox System Error: {str(exc)}"}
 
 def discover_tools(namespace: Dict[str, Any], module_name: str) -> List[str]:
     """Scans namespace for tools belonging to the current module."""
     return [
-        name for name, obj in namespace.items() 
-        if getattr(obj, "_is_toolex_tool", False) 
+        name for name, obj in namespace.items()
+        if getattr(obj, "_is_toolex_tool", False)
         and getattr(obj, "__module__", None) == module_name
     ]
 
@@ -184,4 +198,3 @@ def emit_invocation(tool_icon: str, **kwargs) -> None:
             parts.append(f"{k}={v!r}")
     line = f"{robot}{tool_icon} {' '.join(parts)}"
     print(line, file=sys.stderr, flush=True, end='')
-
