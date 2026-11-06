@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 
-import fnmatch
 import functools
-import json
 
 import sys
 import os
@@ -33,39 +31,16 @@ def check_working_dir(file_path):
 
 def check_permitted_path(file_path, contain=True):
     """
-    Combined containment + grant-pattern check for any path a tool is about to open.
+    Containment check for any path a tool is about to open.
 
-    Patterns come from toolex via TOOLEX_PERMITTED_PATH_PATTERNS (a JSON list of
-    glob patterns granted on the command line, e.g. file:read=README.md,doc/*.md).
-    Missing or empty env var => no pattern constraint (containment still applies
-    when contain=True). Raises PermissionError on violation, naming the allowed
-    patterns so the LLM can self-correct.
+    Pattern enforcement for scoped grants (e.g. file:read=*.py) lives in
+    the toolex runtime layer, which validates each tool's `_path_args`
+    arguments against the granted glob patterns before this module is
+    invoked; nothing sets TOOLEX_PERMITTED_PATH_PATTERNS anymore, so this
+    check is containment-only. Raises Exception on violation.
     """
     if contain:
         check_working_dir(file_path)
-
-    raw = os.environ.get("TOOLEX_PERMITTED_PATH_PATTERNS")
-    if not raw:
-        return
-
-    permitted = json.loads(raw)  # toolex always writes valid JSON
-
-    path = Path(file_path).resolve()
-    workdir = Path(WORKING_DIR).resolve()
-    try:
-        rel = path.relative_to(workdir).as_posix()
-    except ValueError:
-        rel = None
-
-    candidates = [c for c in (rel, path.as_posix(), os.path.normpath(file_path)) if c]
-    for candidate in candidates:
-        if any(fnmatch.fnmatchcase(candidate, pattern) for pattern in permitted):
-            return
-
-    raise PermissionError(
-        f"Access Denied: {file_path!r} resolves to {path.as_posix()!r} which does not "
-        f"match permitted patterns {sorted(permitted)}"
-    )
 
 
 def _read_file_impl(file_path):
