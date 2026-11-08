@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """test_minishell-2.py — the §9 test plan for minishell_tools.py, updated for
-the read/write path-scoping patch set (Changes 1–13).
+the read/write path-scoping patch set (Changes 1–13) and the rm primitive.
 
 Companion file: pairs with tooling-2.py, minishell_tools-2.py, and toolex-2.py —
 move all four into place together (it imports the *installed* module names).
@@ -9,8 +9,8 @@ Run from the repo root:            pytest test_minishell.py -q
 
 Group order: parser/redirects, registry, operand classification, dispatch,
 path grants (PathGuard), pre-dispatch enforcement, patch under a patterned
-write grant, pipeline, runner, e2e sed, configure/assembly, schema surface,
-tooling decorator contract, toolex (unit).
+write grant, rm (the delete primitive), pipeline, runner, e2e sed,
+configure/assembly, schema surface, tooling decorator contract, toolex (unit).
 
 Patch-set notes (this revision):
 * Grants are {cap: [patterns]} dicts now (read, read_anywhere, write,
@@ -36,6 +36,10 @@ Patch-set notes (this revision):
   configure / schema-surface groups, so test ordering cannot leak state.
 * minishell_tools._WORKSPACE is bound at import time: glob tests patch
   the module attribute (monkeypatch.setattr), not the SANDBOX_CONFIG dict.
+* rm is the new native write command: single-file os.unlink, no options
+  (so no -r/-rf recursion), exactly one operand, write-grant-gated and
+  PathGuard-checked like tee. The prompt-guardrail tests pin the two
+  anti-truncation lines (static docstring + mode-conditional banner note).
 * The real-schema-generator test skips (not fails) when the imported
   `toolex` lacks `generate_openai_schema` — that indicates a stale or
   shadowing `toolex` module on sys.path, i.e. an environment problem,
@@ -66,9 +70,9 @@ EXPECTED_COMMANDS = {
     "grep", "sed", "cut", "tr", "sort",
     "date", "find",
     "echo", "printf", "help",
-    "patch", "tee",
+    "patch", "tee", "rm",
 }
-assert len(EXPECTED_COMMANDS) == 28
+assert len(EXPECTED_COMMANDS) == 29
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +312,7 @@ def test_empty_segment_rejected(line, stage):
 # registry
 # ---------------------------------------------------------------------------
 
-def test_registry_holds_exactly_28():
+def test_registry_holds_exactly_29():
     assert set(minishell_tools._REGISTRY._by_name) == EXPECTED_COMMANDS
 
 
@@ -316,6 +320,7 @@ def test_registry_holds_all_regardless_of_grant():
     reg = minishell_tools._REGISTRY
     assert reg.get("patch") is not None and reg.get("patch").caps == frozenset({"write"})
     assert reg.get("tee").caps == frozenset({"write"})
+    assert reg.get("rm").caps == frozenset({"write"})
     assert reg.get("ls").caps == frozenset({"read"})
     assert reg.get("no_such_command") is None
 
@@ -332,14 +337,14 @@ def test_index_filtered_by_grant():
     reg = minishell_tools._REGISTRY
     read_names = {s.name for s in reg._by_name.values()
                   if minishell_tools._allowed(s, {"read": ["*"]})}
-    assert "patch" not in read_names and "tee" not in read_names
+    assert "patch" not in read_names and "tee" not in read_names and "rm" not in read_names
     assert names_in(reg.index({"read": ["*"]})) == read_names
     # *_anywhere covers the scoped twin at name level (R15)
     anywhere = {s.name for s in reg._by_name.values()
                 if minishell_tools._allowed(s, {"read_anywhere": ["*"]})}
     assert anywhere == read_names
     wild = names_in(reg.index(WILD))
-    assert {"patch", "tee"} <= wild and len(wild) == 28
+    assert {"patch", "tee", "rm"} <= wild and len(wild) == 29
 
 
 def test_index_header_states_the_grant_and_disabled_list():
@@ -348,7 +353,7 @@ def test_index_header_states_the_grant_and_disabled_list():
     assert reg.index({"read": ["*.py"]}).splitlines()[0] == "grant: read=*.py"
     assert reg.index(WILD).splitlines()[0] == "grant: *"
     read_index = reg.index({"read": ["*"]})
-    assert "disabled this session: patch, tee" in read_index
+    assert "disabled this session: patch, rm, tee" in read_index
     # an empty grant (the fail-closed normalization) says so explicitly
     assert "(nothing granted)" in reg.index({})
 
@@ -360,7 +365,7 @@ def test_index_limit_hint_and_unlimited():
     assert "whoami" not in trunc                       # only the first 10 chars survived
     full = reg.index(WILD, limit=None)
     assert full == reg.index(WILD, limit=10 ** 6)      # unlimited == effectively-unlimited
-    assert len(names_in(full)) == 28
+    assert len(names_in(full)) == 29
 
 
 def test_duplicate_name_raises_at_register():
@@ -394,7 +399,7 @@ def test_index_tags_stdin_commands():
     for name in ("cat", "head", "tail", "wc", "uniq", "diff", "grep", "sed",
                  "cut", "tr", "sort", "patch", "tee"):
         assert "[stdin]" in by_name[name], name
-    for name in ("ls", "pwd", "date", "find", "echo", "printf", "help"):
+    for name in ("ls", "pwd", "date", "find", "echo", "printf", "help", "rm"):
         assert "[stdin]" not in by_name[name], name
 
 
@@ -420,6 +425,10 @@ def test_operand_classification_per_command():
     assert reg.get("patch").write_paths == "diff_headers"
     assert reg.get("tee").write_paths == "all_positionals"
     assert reg.get("tee").read_paths == "none"
+    # rm: single-file unlink — its one operand is write-classified, no reads.
+    assert reg.get("rm").write_paths == "all_positionals"
+    assert reg.get("rm").read_paths == "none"
+    assert reg.get("rm").native is True
     for name in ("pwd", "whoami", "which", "basename", "dirname", "date",
                  "echo", "printf", "help", "cut", "tr"):
         spec = reg.get(name)
@@ -488,6 +497,7 @@ def test_unspaced_pipe_is_single_unknown_token():
 @pytest.mark.parametrize("line,msg", [
     ("patch f.diff", "permission denied: patch requires write"),
     ("tee out.txt", "permission denied: tee requires write"),
+    ("rm out.txt", "permission denied: rm requires write"),
 ])
 def test_write_denied_under_read_grant(line, msg):
     res, fake = run_line(line, granted={"read": ["*"]})
@@ -531,10 +541,17 @@ def test_write_denied_under_read_grant(line, msg):
     ("diff -X excl a b", "diff exclude/from-file options are disabled"),
     ("diff --from-file=old new", "diff exclude/from-file options are disabled"),
     ("file -f list.txt", "file -f is disabled"),
-    ("file --files-from=list.txt", "file --files-from is disabled"),
+    ("file --files-from=list.txt", "file -f is disabled"),
     ("patch -p2 x.diff", "option -p is disabled"),
     ("patch -b x.diff", "option -b is disabled"),
     ("patch --output=out x.diff", "option --output is disabled"),
+    # rm options are all banned — single-file unlink only, no -r/-rf ever:
+    ("rm -r dir", "rm options are disabled"),
+    ("rm -rf dir", "rm options are disabled"),
+    ("rm -f file.txt", "rm options are disabled"),
+    ("rm -i file.txt", "rm options are disabled"),
+    ("rm --recursive dir", "rm options are disabled"),
+    ("rm -- file.txt", "rm options are disabled"),
 ])
 def test_validators_block_destructive_flags(line, frag):
     res, fake = run_line(line)
@@ -602,7 +619,7 @@ def test_help_untruncated_matches_registry():
     assert res.exit_code == 0
     assert fake.calls == []                              # native — no fork
     assert res.stdout == minishell_tools._REGISTRY.index(minishell_tools._GRANT, limit=None) + "\n"
-    assert len(names_in(res.stdout)) == 28
+    assert len(names_in(res.stdout)) == 29
     assert "run 'help' for the full list" not in res.stdout
 
 
@@ -725,6 +742,17 @@ def test_scoped_write_denial_for_tee(ws):
     assert fake.calls == []                        # echo is native; tee never dispatched
 
 
+def test_scoped_write_denial_for_rm(ws):
+    # rm's operand is write-classified: under a patterned write grant a
+    # non-matching operand is denied BEFORE the native unlink runs.
+    res, fake = run_line("rm out.txt",
+                         granted={"read": ["*"], "write": ["*.log"]})
+    assert res.exit_code == 126
+    assert "pipeline stage 1 (rm) denied, exit 126" in res.stderr
+    assert "does not match permitted write patterns" in res.stderr
+    assert fake.calls == []                        # native — the only fail-signal is the 126
+
+
 def test_scoped_grant_still_runs_matching_paths(ws):
     res, fake = run_line("cat a.py", granted={"read": ["*.py"]},
                          results=[minishell_tools.CommandResult("x = 1\n", "", 0)])
@@ -742,6 +770,14 @@ def test_empty_pattern_grant_denies_at_dispatch_despite_name_level_grant(ws):
 
 def test_scoped_grant_denies_absolute_operands(ws):
     res, fake = run_line("cat /etc/passwd", granted={"read": ["*"]})
+    assert res.exit_code == 126
+    assert "outside the working directory" in res.stderr
+    assert fake.calls == []
+
+
+def test_scoped_rm_denies_absolute_operands(ws):
+    # The unlink operand must obey the same containment rule as tee's.
+    res, fake = run_line("rm /etc/passwd", granted={"read": ["*"], "write": ["*"]})
     assert res.exit_code == 126
     assert "outside the working directory" in res.stderr
     assert fake.calls == []
@@ -888,6 +924,101 @@ def test_unpatterned_write_grant_skips_header_extraction(ws):
 
 
 # ---------------------------------------------------------------------------
+# rm — the delete primitive (native write command)
+# ---------------------------------------------------------------------------
+
+def test_rm_removes_a_single_file(ws):
+    (ws / "stale.txt").write_text("gone soon\n")
+    res, fake = run_line("rm stale.txt")
+    assert res.exit_code == 0
+    assert fake.calls == []                     # native — no fork, no runner
+    assert not (ws / "stale.txt").exists()
+
+
+def test_rm_missing_file_reports_error_not_crash(ws):
+    res, _ = run_line("rm no_such_file.txt")
+    assert res.exit_code == 1
+    assert "rm:" in res.stderr                  # os.error surfaced, not an exception
+
+
+def test_rm_refuses_directories(ws):
+    (ws / "dir").mkdir()
+    res, _ = run_line("rm dir")
+    assert res.exit_code == 1                   # os.unlink cannot remove a directory
+    assert (ws / "dir").is_dir()
+
+
+def test_rm_requires_exactly_one_operand(ws):
+    (ws / "a.txt").write_text("x\n")
+    (ws / "b.txt").write_text("y\n")
+    res, _ = run_line("rm")
+    assert res.exit_code == 1
+    assert "exactly one file operand" in res.stderr
+    res, _ = run_line("rm a.txt b.txt")
+    assert res.exit_code == 1
+    assert "exactly one file operand" in res.stderr
+    assert (ws / "a.txt").exists() and (ws / "b.txt").exists()   # nothing was unlinked
+
+
+def test_rm_succeeds_under_write_grant(ws):
+    (ws / "stale.log").write_text("x\n")
+    res, fake = run_line("rm stale.log", granted={"read": ["*"], "write": ["*"]})
+    assert res.exit_code == 0
+    assert fake.calls == []
+    assert not (ws / "stale.log").exists()
+
+
+def test_rm_rejected_under_read_only_grant(ws):
+    (ws / "precious.txt").write_text("keep me\n")
+    res, fake = run_line("rm precious.txt", granted={"read": ["*"]})
+    assert res.exit_code == 126
+    assert "permission denied: rm requires write" in res.stderr
+    assert fake.calls == []
+    assert (ws / "precious.txt").exists()       # the file survived
+
+
+def test_rm_denied_for_out_of_workdir_operand_even_under_write_grant(ws, tmp_path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("do not touch\n")
+    res, fake = run_line(f"rm {outside}", granted={"read": ["*"], "write": ["*"]})
+    assert res.exit_code == 126
+    assert "outside the working directory" in res.stderr
+    assert fake.calls == []
+    assert outside.exists()                     # the file survived
+
+
+def test_rm_operand_is_pattern_checked_under_scoped_write(ws):
+    (ws / "keep.py").write_text("x\n")
+    (ws / "notes.txt").write_text("y\n")
+    res, fake = run_line("rm notes.txt", granted={"read": ["*"], "write": ["*.py"]})
+    assert res.exit_code == 126
+    assert "does not match permitted write patterns" in res.stderr
+    assert fake.calls == []
+    res, _ = run_line("rm keep.py", granted={"read": ["*"], "write": ["*.py"]})
+    assert res.exit_code == 0
+    assert not (ws / "keep.py").exists()
+
+
+def test_rm_native_unlink_operates_on_the_workspace_root(ws, tmp_path):
+    # Relative operands anchor at _WORKSPACE even though the toolex process
+    # CWD differs — the native command has no runner cwd to inherit.
+    deep = ws / "sub"
+    (deep / "gone.py").write_text("z\n")
+    monkey_cwd = tmp_path / "elsewhere"
+    monkey_cwd.mkdir()
+    import os as _os
+    old_cwd = _os.getcwd()
+    _os.chdir(monkey_cwd)
+    try:
+        res, _ = run_line("rm sub/gone.py")
+        assert res.exit_code == 0
+        assert not (deep / "gone.py").exists()
+        assert not (monkey_cwd / "gone.py").exists()
+    finally:
+        _os.chdir(old_cwd)
+
+
+# ---------------------------------------------------------------------------
 # pipeline (mocked runner)
 # ---------------------------------------------------------------------------
 
@@ -916,6 +1047,16 @@ def test_fail_fast_names_stage_and_command():
     assert "pipeline stage 2 (grep) failed, exit 1" in res.stderr
     assert "boom" in res.stderr
     assert res.stdout == ""                            # failing stage's stdout
+
+
+def test_rm_can_sit_mid_pipeline():
+    # rm produces no stdout; a following stage gets an empty buffer.
+    res, fake = run_line("rm a.txt | wc",
+                         results=[minishell_tools.CommandResult("0 0 0\n", "", 0)])
+    assert res.exit_code == 0
+    assert len(fake.calls) == 1                        # only wc forked (rm is native)
+    assert fake.calls[0][0][:1] == ["wc"]
+    assert fake.calls[0][1] == ""                      # rm's empty stdout fed wc
 
 
 def test_truncation_caps_100k_stdout():
@@ -1143,7 +1284,7 @@ def test_configure_banner_states_scoped_patterns_and_disabled(fresh):
     fresh.configure({"read": ["*.py"]}, engine="host")
     doc = fresh.shell.__doc__ or ""
     assert "Permission mode: read in the workdir (paths matching: *.py)." in doc
-    assert "Disabled this session: patch, tee." in doc
+    assert "Disabled this session: patch, rm, tee." in doc
 
 
 def test_configure_patterned_write_advertises_patch_header_rules(fresh):
@@ -1171,6 +1312,27 @@ def test_command_index_helper_matches_registry(fresh):
     assert fresh.command_index() == fresh._REGISTRY.index(fresh._GRANT)
 
 
+def test_static_docstring_carries_the_never_approximate_line(fresh):
+    # Standing invariant (the truncation incident): the un-configured shell
+    # docstring must already tell the model to refuse unsupported operations
+    # rather than improvise a destructive approximation.
+    doc = fresh.shell.__doc__ or ""
+    assert "never approximate" in doc
+    assert "provide the exact command to run outside the sandbox" in doc
+
+
+def test_no_delete_primitive_note_in_read_only_absent_in_write(fresh):
+    # Mode-conditional guardrail: read-only sessions have no unlink, so the
+    # banner must warn against truncation-as-deletion; a write-granted
+    # session HAS rm, so the note would be false and must be absent.
+    fresh.configure({"read": ["*"]}, engine="host")
+    assert "no delete primitive" in (fresh.shell.__doc__ or "")
+    assert "do not simulate deletion by truncating it" in (fresh.shell.__doc__ or "")
+
+    fresh.configure({"read": ["*"], "write": ["*"]}, engine="host")
+    assert "no delete primitive" not in (fresh.shell.__doc__ or "")
+
+
 # ---------------------------------------------------------------------------
 # schema surface
 # ---------------------------------------------------------------------------
@@ -1184,7 +1346,7 @@ def test_discover_tools_finds_exactly_shell():
 def test_doc_after_configure_lists_core_commands(fresh):
     fresh.configure({"*": ["*"]}, engine="host")
     doc = fresh.shell.__doc__ or ""
-    for name in ("ls", "grep", "find", "patch"):
+    for name in ("ls", "grep", "find", "patch", "rm"):
         assert name in doc
 
 

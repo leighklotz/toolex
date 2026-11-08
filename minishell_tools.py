@@ -3,7 +3,7 @@
 
 One module contains everything: the CommandResult type, the @command
 annotation, the command registry, both runners (host / podman), the
-PathGuard, the pipe-only interpreter, all 28 shell commands, and the
+PathGuard, the pipe-only interpreter, all 29 shell commands, and the
 single LLM-facing `shell` tool. The registry is built from this module's
 own namespace at import time, so adding a command is writing one
 decorated function — there is no wiring step and no second module.
@@ -23,9 +23,9 @@ file_tools):
                     matching the patterns (["*"] = everything inside)
     read_anywhere   read-cap commands touch any host path; patterns, if
                     given, match resolved absolute paths
-    write           tee/patch modify paths inside the workspace matching
+    write           rm/tee/patch modify paths inside the workspace matching
                     the patterns
-    write_anywhere  tee/patch modify any host path
+    write_anywhere  rm/tee/patch modify any host path
     all / *         all four above with patterns ["*"] (toolex maps the
                     CLI cap `all` to `*`; also the standalone default)
 
@@ -47,7 +47,7 @@ Canonical invocations:
 
     toolex.py --tools minishell                # read-only, contained in the workdir
     toolex.py --tools minishell:read=*.py      # read-only, only *.py paths
-    toolex.py --tools minishell:read:write     # + tee/patch inside the workdir
+    toolex.py --tools minishell:read:write     # + rm/tee/patch inside the workdir
     toolex.py --tools minishell:read_anywhere  # host-wide read (engine caveats below)
     toolex.py --tools minishell:read --engine podman
 
@@ -368,7 +368,7 @@ class PodmanRunner:
 
 # Known residual holes, accepted for v1 (hardening backlog):
 #   - GNU long-option abbreviation can alias banned options past these
-#     guards (e.g. --fil=… matching --file=…).
+#     guards (e.g. --fil… matching --file=…).
 #   - sort may still spill to $TMPDIR; du's --files0-from list file is
 #     not path-checked.
 #   - Separated option values (e.g. head -n 5) can be mistaken for
@@ -552,6 +552,18 @@ def _guard_file(rest):
                 raise ValueError(f"file -f is disabled (the file list would "
                                  f"bypass path scoping): {token}")
         i += 1
+
+
+def _guard_rm(rest):
+    # rm is a single-file unlink: EVERY '-'-prefixed token is rejected —
+    # short options (-r, -rf, -i, …), long options (--recursive, …), the
+    # bare stdin marker '-', and even the '--' terminator. The operand list
+    # therefore stays exactly one plain token, so the unlink target can
+    # never diverge from the path PathGuard checked (and a filename that
+    # begins with '-' is reachable as ./-file, as in tee's contract).
+    for tok in rest:
+        if tok.startswith("-"):
+            raise ValueError(f"rm options are disabled (single-file unlink only): {tok}")
 
 
 # --- patch header extraction (R11) ------------------------------------------
@@ -752,13 +764,15 @@ class PathGuard:
 
 
 # ===========================================================================
-# Commands — 28 total, one decorator each. The index renders at ~2.3 KB
+# Commands — 29 total, one decorator each. The index renders at ~2.4 KB
 # (grant header and disabled list included), under the 4 KB schema cap.
 # Trimming the set is deleting a decorator.
 #
 # Runner-command bodies are NEVER executed: the interpreter dispatches them
 # through a Runner using spec.argv (+ parsed tokens), not func. Each stub
 # exists so @command has a function to annotate; doc= feeds the index.
+# Native commands (echo, printf, help, rm) are the exception: their func
+# runs in-process.
 # ===========================================================================
 
 # --- read · no stdin -------------------------------------------------------
@@ -901,8 +915,8 @@ def _find(args: str = "", stdin: str | None = None) -> CommandResult:
     raise NotImplementedError
 
 
-# --- native builtins — the only native=True commands in v1; the func hook is
-#     the extension point for future pure-Python filters.
+# --- native builtins — the func hook is the extension point for future
+#     pure-Python filters.
 
 @command("echo", doc="Print arguments joined by spaces, then a newline.", native=True)
 def _echo(args: list[str] | None = None, stdin: str | None = None) -> CommandResult:
@@ -952,7 +966,7 @@ def _help(args: str = "", stdin: str | None = None) -> CommandResult:
     return CommandResult(_REGISTRY.index(_GRANT, limit=None) + "\n", "", 0)
 
 
-# --- write — the only mutating commands in v1 ---------------------------------
+# --- write — the mutating commands in v1 --------------------------------------
 
 @command("patch", doc="Apply a unified diff to files (pipe the diff in; under a patterned write grant every diff-header target is checked)",
          caps="write", consumes_stdin=True,
@@ -968,6 +982,31 @@ def _patch(args: str = "", stdin: str | None = None) -> CommandResult:
          caps="write", consumes_stdin=True, write_paths="all_positionals")
 def _tee(args: str = "", stdin: str | None = None) -> CommandResult:
     raise NotImplementedError
+
+
+@command("rm", doc="Remove (unlink) ONE file: rm FILE  (no options, no directories, no recursion)",
+         caps="write", native=True, write_paths="all_positionals", validate=_guard_rm)
+def _rm(args: list[str] | None = None, stdin: str | None = None) -> CommandResult:
+    # Native single-file unlink — the real delete primitive for write-granted
+    # sessions (the truncation workaround is retired). Exactly one operand:
+    # no -r/-rf, no directory recursion (os.unlink on a directory fails with
+    # IsADirectoryError). The validator has already refused every '-...'-token,
+    # so the single operand here is byte-identical to the one PathGuard
+    # checked. Relative operands are anchored at the workspace — native
+    # commands run in-process, so there is no runner cwd to inherit;
+    # _WORKSPACE is the same root PathGuard anchored at construction time.
+    toks = args or []
+    if len(toks) != 1 or toks[0].startswith("-"):   # startswith: defense in depth
+        return CommandResult("", "rm: exactly one file operand is required "
+                                  "(single-file unlink only)", 1)
+    target = Path(toks[0])
+    if not target.is_absolute():
+        target = Path(_WORKSPACE) / target
+    try:
+        os.unlink(target)
+    except OSError as e:
+        return CommandResult("", f"rm: {e}", 1)
+    return CommandResult("", "", 0)
 
 
 # ===========================================================================
@@ -1334,7 +1373,8 @@ def configure(grant, engine: str = "host"):
     Effects: installs _GRANT, _guard (PathGuard), and _runner; appends a
     permission banner (scope phrases for read and write, the disabled
     command list, the podman `/host` note when applicable, the scoped-patch
-    instruction when the write grant is patterned) plus the granted command
+    instruction when the write grant is patterned, and the no-delete-primitive
+    note when no write grant is active) plus the granted command
     index to the shell tool's docstring, so the LLM sees the effective scope
     before acting — no set-difference inference required.
     """
@@ -1369,6 +1409,11 @@ def configure(grant, engine: str = "host"):
                      "headers and must be workdir-relative; pipe the diff in on "
                      "stdin — file operands, -i, and absolute header paths are "
                      "disabled for scoped patch")
+    if PathGuard._dominant(_GRANT, "write", "write_anywhere") is None:
+        notes.append("This session has no delete primitive. If asked to delete a "
+                     "file, do not simulate deletion by truncating it; state that "
+                     "deletion is unavailable and give the exact command to run "
+                     "outside the sandbox.")
     shell.__doc__ = (shell.__doc__ or "").rstrip() + (
         "\n\n" + " ".join(notes)
         + "\n\nAvailable commands:\n" + _REGISTRY.index(_GRANT))
@@ -1404,6 +1449,10 @@ def shell(
     denials exit 126; syntax errors exit 2; timeouts exit 124. A command that
     reads stdin refuses to run as the first stage without file arguments,
     instead of silently succeeding on empty input.
+
+    If the user requests an operation no listed command supports, say so and
+    provide the exact command to run outside the sandbox — never approximate
+    a destructive operation with the closest destructive one available.
 
     Path scoping: each stage's path operands are resolved (symlink-safe)
     and checked against the session's read/write grants before the stage
