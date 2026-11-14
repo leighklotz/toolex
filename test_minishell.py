@@ -32,13 +32,18 @@ Patch-set notes (this revision):
   literally (pinned). Standing invariant: any future `> file` support must
   route through the write grant (check_write), never bypass PathGuard.
 * configure() mutates module globals and is not idempotent: the `fresh`
-  fixture reloads minishell_tools before AND after every test in the
-  configure / schema-surface groups, so test ordering cannot leak state.
+  fixture reloads minishell_tools before AND after every test that uses it
+  (configure / schema-surface groups, plus the rm .trash-dir test), so test
+  ordering cannot leak state.
 * minishell_tools._WORKSPACE is bound at import time: glob tests patch
   the module attribute (monkeypatch.setattr), not the SANDBOX_CONFIG dict.
-* rm is the new native write command: single-file os.unlink, no options
-  (so no -r/-rf recursion), exactly one operand, write-grant-gated and
-  PathGuard-checked like tee. The prompt-guardrail tests pin the two
+* rm is the new native write command: a single-file move to .trash/ (no
+  permanent delete in-sandbox; .trash-resident operands are refused), no
+  options (so no -r/-rf recursion), exactly one operand, write-grant-gated
+  and PathGuard-checked like tee; configure() creates .trash/ eagerly under
+  a write grant. The "moved → .trash/" note goes to stderr and the
+  interpreter discards a successful pipeline's stderr, so tests observe the
+  move itself, not the note. The prompt-guardrail tests pin the two
   anti-truncation lines (static docstring + mode-conditional banner note).
 * The real-schema-generator test skips (not fails) when the imported
   `toolex` lacks `generate_openai_schema` — that indicates a stale or
@@ -425,7 +430,7 @@ def test_operand_classification_per_command():
     assert reg.get("patch").write_paths == "diff_headers"
     assert reg.get("tee").write_paths == "all_positionals"
     assert reg.get("tee").read_paths == "none"
-    # rm: single-file unlink — its one operand is write-classified, no reads.
+    # rm: single-file move to .trash/ — its one operand is write-classified, no reads.
     assert reg.get("rm").write_paths == "all_positionals"
     assert reg.get("rm").read_paths == "none"
     assert reg.get("rm").native is True
@@ -545,7 +550,7 @@ def test_write_denied_under_read_grant(line, msg):
     ("patch -p2 x.diff", "option -p is disabled"),
     ("patch -b x.diff", "option -b is disabled"),
     ("patch --output=out x.diff", "option --output is disabled"),
-    # rm options are all banned — single-file unlink only, no -r/-rf ever:
+    # rm options are all banned — single-file move-to-trash only, no -r/-rf ever:
     ("rm -r dir", "rm options are disabled"),
     ("rm -rf dir", "rm options are disabled"),
     ("rm -f file.txt", "rm options are disabled"),
@@ -744,7 +749,7 @@ def test_scoped_write_denial_for_tee(ws):
 
 def test_scoped_write_denial_for_rm(ws):
     # rm's operand is write-classified: under a patterned write grant a
-    # non-matching operand is denied BEFORE the native unlink runs.
+    # non-matching operand is denied before the native move-to-trash runs.
     res, fake = run_line("rm out.txt",
                          granted={"read": ["*"], "write": ["*.log"]})
     assert res.exit_code == 126
@@ -776,7 +781,7 @@ def test_scoped_grant_denies_absolute_operands(ws):
 
 
 def test_scoped_rm_denies_absolute_operands(ws):
-    # The unlink operand must obey the same containment rule as tee's.
+    # The rm operand must obey the same containment rule as tee's.
     res, fake = run_line("rm /etc/passwd", granted={"read": ["*"], "write": ["*"]})
     assert res.exit_code == 126
     assert "outside the working directory" in res.stderr
@@ -924,7 +929,7 @@ def test_unpatterned_write_grant_skips_header_extraction(ws):
 
 
 # ---------------------------------------------------------------------------
-# rm — the delete primitive (native write command)
+# rm — the delete primitive: single-file move to .trash/ (native write command)
 # ---------------------------------------------------------------------------
 
 def test_rm_removes_a_single_file(ws):
@@ -944,7 +949,7 @@ def test_rm_missing_file_reports_error_not_crash(ws):
 def test_rm_refuses_directories(ws):
     (ws / "dir").mkdir()
     res, _ = run_line("rm dir")
-    assert res.exit_code == 1                   # os.unlink cannot remove a directory
+    assert res.exit_code == 1                   # directories are refused (no recursion)
     assert (ws / "dir").is_dir()
 
 
@@ -957,7 +962,7 @@ def test_rm_requires_exactly_one_operand(ws):
     res, _ = run_line("rm a.txt b.txt")
     assert res.exit_code == 1
     assert "exactly one file operand" in res.stderr
-    assert (ws / "a.txt").exists() and (ws / "b.txt").exists()   # nothing was unlinked
+    assert (ws / "a.txt").exists() and (ws / "b.txt").exists()   # nothing was moved
 
 
 def test_rm_succeeds_under_write_grant(ws):
@@ -1018,6 +1023,39 @@ def test_rm_native_unlink_operates_on_the_workspace_root(ws, tmp_path):
         _os.chdir(old_cwd)
 
 
+def test_rm_moves_to_trash(ws):
+    (ws / "stale.txt").write_text("gone soon\n")
+    res, _ = run_line("rm stale.txt")
+    assert res.exit_code == 0
+    assert not (ws / "stale.txt").exists()
+    assert (ws / ".trash" / "stale.txt").exists()
+    assert (ws / ".trash" / "stale.txt").read_text() == "gone soon\n"
+
+
+def test_rm_rejects_trash_resident_operand(ws):
+    (ws / ".trash").mkdir(exist_ok=True)
+    (ws / ".trash" / "foo.txt").write_text("already gone\n")
+    res, _ = run_line("rm .trash/foo.txt")
+    assert res.exit_code == 1
+    assert "already deleted" in res.stderr
+    assert (ws / ".trash" / "foo.txt").exists()   # survived
+
+
+def test_rm_trash_collision_naming(ws):
+    (ws / "x.txt").write_text("1\n")
+    run_line("rm x.txt")
+    (ws / "x.txt").write_text("2\n")
+    res, _ = run_line("rm x.txt")
+    assert res.exit_code == 0
+    assert (ws / ".trash" / "x.txt").read_text() == "1\n"
+    assert (ws / ".trash" / "x.1.txt").read_text() == "2\n"
+
+
+def test_rm_trash_dir_created_by_configure(ws, fresh):
+    fresh.configure({"read": ["*"], "write": ["*"]}, engine="host")
+    assert (ws / ".trash").is_dir()
+
+
 # ---------------------------------------------------------------------------
 # pipeline (mocked runner)
 # ---------------------------------------------------------------------------
@@ -1049,14 +1087,16 @@ def test_fail_fast_names_stage_and_command():
     assert res.stdout == ""                            # failing stage's stdout
 
 
-def test_rm_can_sit_mid_pipeline():
-    # rm produces no stdout; a following stage gets an empty buffer.
+def test_rm_can_sit_mid_pipeline(ws):
+    # rm's "moved → .trash/" note is stderr-only and a successful stage's
+    # stderr is dropped, so the next stage still gets an empty buffer.
+    (ws / "a.txt").write_text("x\n")
     res, fake = run_line("rm a.txt | wc",
                          results=[minishell_tools.CommandResult("0 0 0\n", "", 0)])
     assert res.exit_code == 0
     assert len(fake.calls) == 1                        # only wc forked (rm is native)
     assert fake.calls[0][0][:1] == ["wc"]
-    assert fake.calls[0][1] == ""                      # rm's empty stdout fed wc
+    assert fake.calls[0][1] == ""                      # rm's stdout is empty
 
 
 def test_truncation_caps_100k_stdout():
@@ -1322,15 +1362,17 @@ def test_static_docstring_carries_the_never_approximate_line(fresh):
 
 
 def test_no_delete_primitive_note_in_read_only_absent_in_write(fresh):
-    # Mode-conditional guardrail: read-only sessions have no unlink, so the
-    # banner must warn against truncation-as-deletion; a write-granted
-    # session HAS rm, so the note would be false and must be absent.
+    # Mode-conditional guardrail: read-only sessions have no delete primitive,
+    # so the banner must warn against truncation-as-deletion; a write-granted
+    # session HAS rm (move to .trash/), so the note would be false and must be
+    # absent — replaced by the rm→.trash note.
     fresh.configure({"read": ["*"]}, engine="host")
     assert "no delete primitive" in (fresh.shell.__doc__ or "")
     assert "do not simulate deletion by truncating it" in (fresh.shell.__doc__ or "")
 
     fresh.configure({"read": ["*"], "write": ["*"]}, engine="host")
     assert "no delete primitive" not in (fresh.shell.__doc__ or "")
+    assert "rm moves files to .trash/" in (fresh.shell.__doc__ or "")
 
 
 # ---------------------------------------------------------------------------

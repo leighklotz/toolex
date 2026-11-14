@@ -555,10 +555,10 @@ def _guard_file(rest):
 
 
 def _guard_rm(rest):
-    # rm is a single-file unlink: EVERY '-'-prefixed token is rejected —
+    # rm is a single-file move to trash: EVERY '-'-prefixed token is rejected —
     # short options (-r, -rf, -i, …), long options (--recursive, …), the
     # bare stdin marker '-', and even the '--' terminator. The operand list
-    # therefore stays exactly one plain token, so the unlink target can
+    # therefore stays exactly one plain token, so the move source can
     # never diverge from the path PathGuard checked (and a filename that
     # begins with '-' is reachable as ./-file, as in tee's contract).
     for tok in rest:
@@ -984,16 +984,16 @@ def _tee(args: str = "", stdin: str | None = None) -> CommandResult:
     raise NotImplementedError
 
 
-@command("rm", doc="Remove (unlink) ONE file: rm FILE  (no options, no directories, no recursion)",
+@command("rm", doc="Move ONE file to .trash/ (no permanent delete, no directories, no recursion)",
          caps="write", native=True, write_paths="all_positionals", validate=_guard_rm)
 def _rm(args: list[str] | None = None, stdin: str | None = None) -> CommandResult:
-    # Native single-file unlink — the real delete primitive for write-granted
-    # sessions (the truncation workaround is retired). Exactly one operand:
-    # no -r/-rf, no directory recursion (os.unlink on a directory fails with
-    # IsADirectoryError). The validator has already refused every '-...'-token,
-    # so the single operand here is byte-identical to the one PathGuard
-    # checked. Relative operands are anchored at the workspace — native
-    # commands run in-process, so there is no runner cwd to inherit;
+    # Native single-file move to .trash/ — the delete primitive for
+    # write-granted sessions (the truncation workaround is retired), with no
+    # in-sandbox permanent delete. Exactly one operand: no -r/-rf, no
+    # directory recursion. The validator has already refused every
+    # '-...'-token, so the single operand here is byte-identical to the one
+    # PathGuard checked. Relative operands are anchored at the workspace —
+    # native commands run in-process, so there is no runner cwd to inherit;
     # _WORKSPACE is the same root PathGuard anchored at construction time.
     toks = args or []
     if len(toks) != 1 or toks[0].startswith("-"):   # startswith: defense in depth
@@ -1002,11 +1002,50 @@ def _rm(args: list[str] | None = None, stdin: str | None = None) -> CommandResul
     target = Path(toks[0])
     if not target.is_absolute():
         target = Path(_WORKSPACE) / target
+
+    # Reject anything already inside .trash/ — there is no purge; the only
+    # way to destroy the data is outside the sandbox.
+    trash_root = Path(_WORKSPACE) / _TRASH_DIR
     try:
-        os.unlink(target)
+        target.relative_to(trash_root)
+    except ValueError:
+        pass        # not under .trash — normal path, proceed
+    else:
+        return CommandResult(
+            "",
+            f"rm: .trash/{target.name} is already deleted. "
+            f"To destroy it permanently, remove it outside the sandbox.",
+            1,
+        )
+
+    if target.is_dir():
+        return CommandResult("", f"rm: {target.name} is a directory "
+                                  "(only regular files can be removed)", 1)
+    if not target.exists():
+        return CommandResult("", f"rm: {target.name}: No such file or directory\n", 1)
+
+    trash_root.mkdir(exist_ok=True, parents=True)
+    dest = _unique_trash_path(trash_root, target.name)
+
+    try:
+        os.rename(target, dest)
     except OSError as e:
         return CommandResult("", f"rm: {e}", 1)
-    return CommandResult("", "", 0)
+
+    return CommandResult("", f"moved {target.name} → .trash/{dest.name}\n", 0)
+
+
+def _unique_trash_path(trash_dir: Path, name: str) -> Path:
+    dest = trash_dir / name
+    if not dest.exists():
+        return dest
+    stem, dot, ext = name.rpartition(".")
+    suffix = ("." + ext) if dot else ""
+    n = 1
+    while dest.exists():
+        dest = trash_dir / f"{stem}.{n}{suffix}"
+        n += 1
+    return dest
 
 
 # ===========================================================================
@@ -1016,6 +1055,7 @@ def _rm(args: list[str] | None = None, stdin: str | None = None) -> CommandResul
 _UNSUPPORTED = {"<", ">>", "&&", "||", ";", "(", ")", "&", "`", "|&"}
 _PATTERN_FLAGS = {"-name", "-iname", "-path", "-ipath", "-regex", "-wholename"}
 _WORKSPACE = SANDBOX_CONFIG["host_data_dir"]
+_TRASH_DIR = ".trash"   # workspace-relative; rm's destination, no purge
 
 _REDIRECT_RE = re.compile(r'^(\d?)(>)(/dev/null|&[12])$')
 _SEP_REDIRECT_RE = re.compile(r'^([12]?)>$')
@@ -1373,10 +1413,11 @@ def configure(grant, engine: str = "host"):
     Effects: installs _GRANT, _guard (PathGuard), and _runner; appends a
     permission banner (scope phrases for read and write, the disabled
     command list, the podman `/host` note when applicable, the scoped-patch
-    instruction when the write grant is patterned, and the no-delete-primitive
-    note when no write grant is active) plus the granted command
-    index to the shell tool's docstring, so the LLM sees the effective scope
-    before acting — no set-difference inference required.
+    instruction when the write grant is patterned, the rm→.trash note (with
+    eager .trash/ creation) when a write grant is active, and the
+    no-delete-primitive note when no write grant is active) plus the granted
+    command index to the shell tool's docstring, so the LLM sees the
+    effective scope before acting — no set-difference inference required.
     """
     global _GRANT, _guard, _runner, shell
     grant = _as_grant(grant)
@@ -1409,6 +1450,11 @@ def configure(grant, engine: str = "host"):
                      "headers and must be workdir-relative; pipe the diff in on "
                      "stdin — file operands, -i, and absolute header paths are "
                      "disabled for scoped patch")
+    if PathGuard._dominant(_GRANT, "write", "write_anywhere") is not None:
+        (Path(_WORKSPACE) / _TRASH_DIR).mkdir(exist_ok=True)
+        notes.append("rm moves files to .trash/ (no permanent delete in this "
+                     "session; remove files from .trash/ outside the sandbox "
+                     "to destroy them).")
     if PathGuard._dominant(_GRANT, "write", "write_anywhere") is None:
         notes.append("This session has no delete primitive. If asked to delete a "
                      "file, do not simulate deletion by truncating it; state that "
