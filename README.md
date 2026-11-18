@@ -123,7 +123,7 @@ echo no changes
 
 You can control exactly what tools an LLM can access and which files/directories are reachable using colon (`:`) and equal (`=`) syntax.
 
-Restrict a module to specific predefined capabilities defined in its implementation (e.g., `read`, `write`, `edit`, or `all`). This is applied via the `--tools` flag.
+Restrict a module to specific predefined capabilities defined in its implementation (e.g., `read`, `write`, `edit`, `delete`, or `all`). This is applied via the `--tools` flag.
 
 *   **Specific Capability:** `./toolex.py --tools git:read "Show me diff"`
 *   **All Capabilities for a Module:** `./toolex.py --tools git:all "Commit this change"`
@@ -143,6 +143,7 @@ For tools that interact with the filesystem, you can restrict access to specific
 | `read` / `write` | workspace | Contained in `--workspace-dir`; patterns match workspace-relative paths |
 | `read_anywhere` / `write_anywhere` | host | Patterns match resolved absolute paths; dominates the scoped twin |
 | `edit` / `edit_anywhere` | workspace / host | Mutating like the write family; used by the file-edit tools |
+| `delete` / `delete_anywhere` | workspace / host | Mutating like the write family; minishell-only: `rm` moves a single file to `.trash/` (no permanent delete inside the sandbox). `delete_anywhere` matches resolved absolute paths and dominates the scoped twin |
 | `all` | both | Every capability at once, with the given patterns (the CLI's `all` is normalized to the `*` wildcard internally) |
 
 Patterns are matched case-sensitively with `fnmatch` semantics — `*` also matches `/`, so `*.py` matches `sub/b.py`. An empty pattern list (`module:read=`) denies every path: grants fail closed.
@@ -214,28 +215,35 @@ This allows for complex shell orchestration like:
 
 ## minishell
 
-`minishell_tools` exposes exactly one `shell` tool over a pipe-only, 28-command mini shell (`ls`, `grep`, `sed`, `find`, `patch`, `tee`, …; run `help` for the index). Individual commands never surface as separate tools. The `shell` tool is visible under any grant that names at least one minishell capability (`cap_match="any"`), but per-stage dispatch still denies commands whose capabilities the grant does not cover (exit 126).
+`minishell_tools` exposes exactly one `shell` tool over a pipe-only, 29-command mini shell (`ls`, `grep`, `sed`, `find`, `patch`, `tee`, `rm`, …; run `help` for the index). Individual commands never surface as separate tools. The `shell` tool is visible under any grant that names at least one minishell capability (six in total: `read`, `write`, `delete`, `read_anywhere`, `write_anywhere`, `delete_anywhere`; `cap_match="any"`), but per-stage dispatch still denies commands whose capabilities the grant does not cover (exit 126).
 
 ```bash
 toolex.py --tools minishell                      # read-only, contained in the workdir
 toolex.py --tools 'minishell:read=*.py'          # read-only, only *.py paths
 toolex.py --tools minishell:read:write           # + tee/patch inside the workdir
 toolex.py --tools 'minishell:read:write=*.log'   # writes limited to *.log (tee/patch)
+toolex.py --tools minishell:delete               # rm only — files move into .trash/
 toolex.py --tools minishell:read_anywhere        # host-wide read (see --engine caveats)
 toolex.py --tools minishell:read --engine podman
 ```
 
-After `configure()`, the tool description carries a permission banner — the active mode and patterns, the disabled command list, engine notes — plus the granted command index; `help` re-prints the index at runtime with a `grant: …` header and the disabled list. toolex also opens the session with a one-line `Permissions — …` system message (see *Session preamble* above).
+After `configure()`, the tool description carries a permission banner — the active mode and patterns (read, write, and delete scopes), the disabled command list, engine notes, and a delete note: when a delete grant is active, that `rm` moves files to `.trash/` (with eager `.trash/` creation), and when no delete grant is active, that the session has no delete primitive — plus the granted command index; `help` re-prints the index at runtime with a `grant: …` header and the disabled list. toolex also opens the session with a one-line `Permissions — …` system message (see *Session preamble* above).
 
 Per-command validators disable flags that would touch unclassified paths or escape the grant — e.g. `sed -i`/`-f` (sed runs with `--sandbox` pinned, so `w`/`W`/`r`/`e` script side effects are blocked too), `grep -f`/`--exclude-from`, `diff -X`/`--from-file`, `file -f`, `sort -o`/`-T`/`--random-source`, `date -s`/`-f`, and destructive `find` predicates. The denial message names the offending flag.
 
-Each stage's path operands are classified per command (separately on the read and write side) and resolved symlink-safe before anything is dispatched. Scoped grants require workspace containment and match workspace-relative patterns; `*_anywhere` grants drop containment, dominate their scoped twin, and match resolved absolute paths. A denied path exits 126 and names the violated constraint (missing grant, containment, or pattern) plus the allowed patterns, so the model can self-correct.
+Each stage's path operands are classified per command (separately on the read, write, and delete sides) and resolved symlink-safe before anything is dispatched. Scoped grants require workspace containment and match workspace-relative patterns; `*_anywhere` grants drop containment, dominate their scoped twin, and match resolved absolute paths. A denied path exits 126 and names the violated constraint (missing grant, containment, or pattern) plus the allowed patterns, so the model can self-correct.
 
 Under a **patterned** write grant, `patch` is stdin-only: its write targets come from the piped diff's `---`/`+++` headers (`-p1` stripped, `/dev/null` operands skipped), each target must be workdir-relative and match the write patterns, and retargeting options are banned — the argv is pinned to `patch -p1 --no-backup-if-mismatch --reject-file=/dev/null`. With an unpatterned (`*`) write grant no header parsing happens.
 
 Under `--engine podman`, each stage runs in a throwaway no-network container with the workspace mounted read-only (read-write only for write-cap stages). An anywhere-read grant additionally mounts the host root read-only at `/host` — prefix host paths with `/host` — and `write_anywhere` is rejected outright.
 
 Failure codes: validator denials exit 1, path/permission denials 126, unknown commands 127, syntax errors 2, timeouts 124. The pipeline stops at the first failing stage and the error names the stage and command.
+
+### Delete
+
+`rm` is the delete primitive, and it is deliberately narrow: it moves **one file** to `.trash/` inside the workspace — any `-`-prefixed token is rejected (no `-r`/`-rf`), no directories, no recursion, and no in-sandbox permanent delete. Destroying a file means removing it from `.trash/` **outside** the sandbox; operands already inside `.trash/` are refused (there is no purge).
+
+`rm` requires the `delete` capability — `delete_anywhere` covers paths outside the workdir and dominates the scoped twin, with patterns matching resolved absolute paths. With a delete grant active the banner notes the `.trash/` behavior; without one, `rm` is disabled for the session, the banner says so, and deletion must not be simulated by truncating files.
 
 ### Redirects
 Only `> /dev/null`, `2>/dev/null`, and `2>&1` are honored. Any other `>` target stays a literal argument — it can never become a hidden write channel — so file redirection remains unsupported until it can be gated on the write grant.
