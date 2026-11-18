@@ -23,16 +23,21 @@ file_tools):
                     matching the patterns (["*"] = everything inside)
     read_anywhere   read-cap commands touch any host path; patterns, if
                     given, match resolved absolute paths
-    write           rm/tee/patch modify paths inside the workspace matching
+    write           tee/patch modify paths inside the workspace matching
                     the patterns
-    write_anywhere  rm/tee/patch modify any host path
-    all / *         all four above with patterns ["*"] (toolex maps the
+    write_anywhere  tee/patch modify any host path
+    delete          rm moves a file to .trash/ — paths inside the
+                    workspace matching the patterns
+    delete_anywhere rm moves any host path into .trash/; patterns, if
+                    given, match resolved absolute paths
+    all / *         all six above with patterns ["*"] (toolex maps the
                     CLI cap `all` to `*`; also the standalone default)
 
 Anywhere dominates scoped (read_anywhere over read, write_anywhere over
-write; the dominant scope's patterns apply). The `shell` tool is visible
-under any minishell grant, but per-stage dispatch still denies commands
-whose capabilities are not covered (exit 126).
+write, delete_anywhere over delete; the dominant scope's patterns
+apply). The `shell` tool is visible under any minishell grant, but
+per-stage dispatch still denies commands whose capabilities are not
+covered (exit 126).
 
 Enforcement is in-interpreter and pre-dispatch: PathGuard resolves every
 stage's path operands (symlink-safe — a workspace symlink pointing
@@ -47,7 +52,8 @@ Canonical invocations:
 
     toolex.py --tools minishell                # read-only, contained in the workdir
     toolex.py --tools minishell:read=*.py      # read-only, only *.py paths
-    toolex.py --tools minishell:read:write     # + rm/tee/patch inside the workdir
+    toolex.py --tools minishell:read:write     # + tee/patch inside the workdir
+    toolex.py --tools minishell:delete         # rm only — files move into .trash/
     toolex.py --tools minishell:read_anywhere  # host-wide read (engine caveats below)
     toolex.py --tools minishell:read --engine podman
 
@@ -126,11 +132,12 @@ class CommandResult:
 class CommandSpec:
     name: str
     doc: str
-    caps: frozenset[str]                 # subset of {"read", "write"}
+    caps: frozenset[str]                 # subset of {"read", "write", "delete"}
     consumes_stdin: bool = False         # runner-mode: reads stdin when no file operands
     nonfile_operands: int = 0            # leading positional operands that are NOT files
     read_paths: str = "none"             # which operands are paths the stage reads (R10)
     write_paths: str = "none"            # which operands are paths the stage writes (R10)
+    delete_paths: str = "none"           # which operands are paths the stage deletes (R10)
     argv: tuple[str, ...] = ()           # defaults to (name,) — PATH lookup
     native: bool = False                 # True → call func(args=…, stdin=…)
     func: Callable | None = None
@@ -157,7 +164,7 @@ _PATH_DESCRIPTOR_VALUES = frozenset({
 
 def command(name, *, doc="", caps="read", consumes_stdin=False,
             nonfile_operands=0, read_paths="none", write_paths="none",
-            argv=None, native=False, validate=None):
+            delete_paths="none", argv=None, native=False, validate=None):
     """Decorator: attach a frozen CommandSpec to a function.
 
     The spec carries the name, doc, and capability set directly — there are
@@ -168,16 +175,21 @@ def command(name, *, doc="", caps="read", consumes_stdin=False,
 
     def deco(f):
         caps_fs = frozenset(caps.split())
-        if not caps_fs <= {"read", "write"}:
-            raise ValueError(f"{name}: caps must be a subset of read/write, got {caps!r}")
-        if read_paths not in _PATH_DESCRIPTOR_VALUES or write_paths not in _PATH_DESCRIPTOR_VALUES:
+        if not caps_fs <= {"read", "write", "delete"}:
+            raise ValueError(f"{name}: caps must be a subset of "
+                             f"read/write/delete, got {caps!r}")
+        if (read_paths not in _PATH_DESCRIPTOR_VALUES
+                or write_paths not in _PATH_DESCRIPTOR_VALUES
+                or delete_paths not in _PATH_DESCRIPTOR_VALUES):
             raise ValueError(f"{name}: unknown path descriptor "
-                             f"(read={read_paths!r}, write={write_paths!r})")
+                             f"(read={read_paths!r}, write={write_paths!r}, "
+                             f"delete={delete_paths!r})")
         f._command_spec = CommandSpec(
             name=name, doc=(doc or inspect.getdoc(f) or "").strip(),
             caps=caps_fs, consumes_stdin=consumes_stdin,
             nonfile_operands=nonfile_operands,
             read_paths=read_paths, write_paths=write_paths,
+            delete_paths=delete_paths,
             argv=tuple(argv) if argv else (name,), native=native,
             func=f if native else None, validate=validate)
         return f
@@ -196,6 +208,7 @@ def command(name, *, doc="", caps="read", consumes_stdin=False,
 _COVERS: dict[str, tuple[str, ...]] = {
     "read": ("read", "read_anywhere"),
     "write": ("write", "write_anywhere"),
+    "delete": ("delete", "delete_anywhere"),
 }
 
 
@@ -205,7 +218,8 @@ def _allowed(spec: CommandSpec, grant: dict[str, list[str]] | frozenset[str]) ->
     `grant` is the {cap: [patterns]} map; its KEYS are the granted cap names.
     A frozenset/set of bare names is also accepted (legacy and test callers).
     {read} is allowed iff the grant contains read, read_anywhere, or '*';
-    {write} iff write, write_anywhere, or '*'.
+    {write} iff write, write_anywhere, or '*'; {delete} iff delete,
+    delete_anywhere, or '*'.
     """
     names = grant.keys() if isinstance(grant, dict) else grant
     if "*" in names:
@@ -276,6 +290,8 @@ class CommandRegistry:
             tags = ""
             if "write" in s.caps:
                 tags += "  [write]"
+            if "delete" in s.caps:
+                tags += "  [delete]"
             if s.consumes_stdin:
                 tags += "  [stdin]"
             lines.append(f"{s.name} — {s.doc}{tags}")
@@ -666,18 +682,19 @@ class PathGuard:
     (TOOLEX_PERMITTED_PATH_PATTERNS is process-global and would collide
     across modules in one session).
 
-    check_read/check_write raise PermissionError on violation and return
-    None on success, mirroring file_tools' check_permitted_path: the message
-    names the violated constraint — missing grant, containment, or pattern —
-    and lists the allowed patterns so the model can self-correct. The
-    interpreter catches these and renders them as the stage's result.
+    check_read/check_write/check_delete raise PermissionError on violation
+    and return None on success, mirroring file_tools' check_permitted_path:
+    the message names the violated constraint — missing grant, containment,
+    or pattern — and lists the allowed patterns so the model can
+    self-correct. The interpreter catches these and renders them as the
+    stage's result.
 
     Scope dominance: read_anywhere dominates read, write_anywhere dominates
-    write. An anywhere scope drops workspace containment and matches
-    patterns against the resolved absolute path; a scoped scope requires
-    containment in the workspace and matches against the workspace-relative
-    POSIX form. fnmatchcase semantics; '*' matches '/' (parity with
-    file_tools: '*.py' matches sub/b.py).
+    write, delete_anywhere dominates delete. An anywhere scope drops
+    workspace containment and matches patterns against the resolved absolute
+    path; a scoped scope requires containment in the workspace and matches
+    against the workspace-relative POSIX form. fnmatchcase semantics; '*'
+    matches '/' (parity with file_tools: '*.py' matches sub/b.py).
 
     Paths are resolved with Path.resolve(): symlinks are followed, so a
     workspace symlink pointing outside is denied under a scoped grant.
@@ -695,6 +712,7 @@ class PathGuard:
         self._workdir = Path(SANDBOX_CONFIG["host_data_dir"]).resolve()
         self._read = self._dominant(grant, "read", "read_anywhere")
         self._write = self._dominant(grant, "write", "write_anywhere")
+        self._delete = self._dominant(grant, "delete", "delete_anywhere")
 
     @staticmethod
     def _dominant(grant: dict, scoped: str,
@@ -719,6 +737,10 @@ class PathGuard:
     def check_write(self, path: str) -> None:
         """Raise PermissionError unless `path` is within the write grant."""
         self._check(path, self._write, "write")
+
+    def check_delete(self, path: str) -> None:
+        """Raise PermissionError unless `path` is within the delete grant."""
+        self._check(path, self._delete, "delete")
 
     def write_is_patterned(self) -> bool:
         """True when a write grant is active AND its pattern list constrains
@@ -966,7 +988,7 @@ def _help(args: str = "", stdin: str | None = None) -> CommandResult:
     return CommandResult(_REGISTRY.index(_GRANT, limit=None) + "\n", "", 0)
 
 
-# --- write — the mutating commands in v1 --------------------------------------
+# --- write / delete — the mutating commands in v1 ------------------------------
 
 @command("patch", doc="Apply a unified diff to files (pipe the diff in; under a patterned write grant every diff-header target is checked)",
          caps="write", consumes_stdin=True,
@@ -985,10 +1007,10 @@ def _tee(args: str = "", stdin: str | None = None) -> CommandResult:
 
 
 @command("rm", doc="Move ONE file to .trash/ (no permanent delete, no directories, no recursion)",
-         caps="write", native=True, write_paths="all_positionals", validate=_guard_rm)
+         caps="delete", native=True, delete_paths="all_positionals", validate=_guard_rm)
 def _rm(args: list[str] | None = None, stdin: str | None = None) -> CommandResult:
     # Native single-file move to .trash/ — the delete primitive for
-    # write-granted sessions (the truncation workaround is retired), with no
+    # delete-granted sessions (the truncation workaround is retired), with no
     # in-sandbox permanent delete. Exactly one operand: no -r/-rf, no
     # directory recursion. The validator has already refused every
     # '-...'-token, so the single operand here is byte-identical to the one
@@ -1229,8 +1251,8 @@ def _positionals(rest: list[str], *, skip_digit_values: bool) -> list[str]:
 
 def _stage_paths(rest: list[str], spec: CommandSpec, kind: str) -> list[str]:
     """Path operands of a stage per its CommandSpec classification (R10).
-    kind is 'read' or 'write'. Sole operand source for the stdin-refusal
-    check and (Change 10) pre-dispatch PathGuard checks."""
+    kind is 'read', 'write', or 'delete'. Sole operand source for the
+    stdin-refusal check and (Change 10) pre-dispatch PathGuard checks."""
     desc = getattr(spec, f"{kind}_paths")
     if desc in ("none", "diff_headers"):
         # 'diff_headers' is resolved from the stage's stdin by the write-side
@@ -1276,6 +1298,8 @@ class MiniShell:
     def _check_stage_paths(self, spec, rest, buffer=None):
         for p in _stage_paths(rest, spec, "read"):
             self._guard.check_read(p)
+        for p in _stage_paths(rest, spec, "delete"):
+            self._guard.check_delete(p)
         if spec.write_paths == "diff_headers":
             if self._guard.write_is_patterned():
                 self._check_patch_targets(spec, rest, buffer)
@@ -1404,18 +1428,18 @@ def configure(grant, engine: str = "host"):
     """Called once by toolex after module load, BEFORE tool schemas are built.
 
     `grant` maps capability names (read, read_anywhere, write,
-    write_anywhere, or `*` for the CLI's `all`) to fnmatch pattern lists.
-    _as_grant normalizes it and fails closed: a non-dict (e.g. an older
-    toolex passing a frozenset) yields an empty grant — nothing permitted.
-    `write_anywhere` + podman raises ValueError (toolex exits 2) BEFORE any
-    module state is touched.
+    write_anywhere, delete, delete_anywhere, or `*` for the CLI's `all`) to
+    fnmatch pattern lists. _as_grant normalizes it and fails closed: a
+    non-dict (e.g. an older toolex passing a frozenset) yields an empty
+    grant — nothing permitted. `write_anywhere` + podman raises ValueError
+    (toolex exits 2) BEFORE any module state is touched.
 
     Effects: installs _GRANT, _guard (PathGuard), and _runner; appends a
-    permission banner (scope phrases for read and write, the disabled
-    command list, the podman `/host` note when applicable, the scoped-patch
-    instruction when the write grant is patterned, the rm→.trash note (with
-    eager .trash/ creation) when a write grant is active, and the
-    no-delete-primitive note when no write grant is active) plus the granted
+    permission banner (scope phrases for read, write, and delete, the
+    disabled command list, the podman `/host` note when applicable, the
+    scoped-patch instruction when the write grant is patterned, the rm→.trash
+    note (with eager .trash/ creation) when a delete grant is active, and the
+    no-delete-primitive note when no delete grant is active) plus the granted
     command index to the shell tool's docstring, so the LLM sees the
     effective scope before acting — no set-difference inference required.
     """
@@ -1429,13 +1453,15 @@ def configure(grant, engine: str = "host"):
     _GRANT = grant
     _guard = PathGuard(_GRANT)
     read_scope = PathGuard._dominant(_GRANT, "read", "read_anywhere")
+    delete_scope = PathGuard._dominant(_GRANT, "delete", "delete_anywhere")
     anywhere_read = bool(read_scope and read_scope[0])
     _runner = PodmanRunner(host_root=anywhere_read) if engine == "podman" else HostRunner()
     denied = sorted(s.name for s in _REGISTRY._by_name.values()
                     if not _allowed(s, _GRANT))
     mode = "; ".join(p for p in (_scope_phrase("read", read_scope),
                                  _scope_phrase("write",
-                                     PathGuard._dominant(_GRANT, "write", "write_anywhere")))
+                                     PathGuard._dominant(_GRANT, "write", "write_anywhere")),
+                                 _scope_phrase("delete", delete_scope))
                      if p) or "no permissions"
     notes = [f"Permission mode: {mode}."]
     if denied:
@@ -1450,12 +1476,12 @@ def configure(grant, engine: str = "host"):
                      "headers and must be workdir-relative; pipe the diff in on "
                      "stdin — file operands, -i, and absolute header paths are "
                      "disabled for scoped patch")
-    if PathGuard._dominant(_GRANT, "write", "write_anywhere") is not None:
+    if delete_scope is not None:
         (Path(_WORKSPACE) / _TRASH_DIR).mkdir(exist_ok=True)
         notes.append("rm moves files to .trash/ (no permanent delete in this "
                      "session; remove files from .trash/ outside the sandbox "
                      "to destroy them).")
-    if PathGuard._dominant(_GRANT, "write", "write_anywhere") is None:
+    else:
         notes.append("This session has no delete primitive. If asked to delete a "
                      "file, do not simulate deletion by truncating it; state that "
                      "deletion is unavailable and give the exact command to run "
@@ -1469,7 +1495,7 @@ def configure(grant, engine: str = "host"):
 # The LLM surface (the only _is_toolex_tool in the file)
 # ===========================================================================
 
-@tool(("read", "read_anywhere", "write", "write_anywhere"),
+@tool(("read", "read_anywhere", "write", "write_anywhere", "delete", "delete_anywhere"),
       self_scoped=True, cap_match="any")
 def shell(
     command_line: Annotated[
@@ -1501,8 +1527,8 @@ def shell(
     a destructive operation with the closest destructive one available.
 
     Path scoping: each stage's path operands are resolved (symlink-safe)
-    and checked against the session's read/write grants before the stage
-    runs; a denied path exits 126 and names the constraint plus the
+    and checked against the session's read/write/delete grants before the
+    stage runs; a denied path exits 126 and names the constraint plus the
     allowed patterns. The banner below (added when toolex configures the
     session) states the active mode and patterns.
     """
