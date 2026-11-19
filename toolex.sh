@@ -2,7 +2,7 @@
 
 SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE}")")"
 : "${HX_HOME:=$HOME/wip/answer}"
-TOOLEX_PY=~/wip/toolex/toolex.py
+TOOLEX_PY=~/wip/toolex/src/toolex.py
 
 source "${HX_HOME}/bin/commands/hx-bootstrap.sh" && hx core
 

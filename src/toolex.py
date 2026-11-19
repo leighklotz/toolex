@@ -5,7 +5,7 @@
 # or
 # ask "read file /tmp/test.txt" | toolex.py --tools file:read=*.txt | answer
 # or (multiple restrictions)
-# ask "run script and write log" | toolex.py --tools file:read=*.py,file:write=*.log | answer
+# ask "run script and write log" | toolex.py --tools file:read=*.py:write=*.log | answer
 
 # toolex: dict-grant transport to configure(), cap_match/self_scoped-aware visibility, patterned 'all'/'*' honored at runtime, minishell-aware preamble.
 
@@ -98,66 +98,65 @@ def generate_openai_schema(obj):
 
 def parse_permissions(args_list: List[str]) -> Dict[str, Dict[str, List[str]]]:
     """
-    weather                        -> {'weather_tools': {'read': ['*']}}
-    git:read                       -> {'git_tools': {'read': ['*']}}
-    git:read:write                 -> {'git_tools': {'read': ['*'], 'write': ['*']}}
-    file:read=*.py                 -> {'file_tools': {'read': ['*.py']}}
-    file:read=README.md,doc/*.md   -> {'file_tools': {'read': ['README.md', 'doc/*.md']}}
-    file:read=doc/README.md:write=doc/README.md.new -> {'file_tools': {'read': ['doc/README.md'], 'write': ['doc/README.md.new']}}
+    Syntax: one --tools SPEC per module. A colon separates capabilities
+    within the module, a comma separates patterns within one capability,
+    and = attaches a pattern list to a capability (no list -> wildcard "*").
+
+    weather                            -> {"weather_tools": {"read": ["*"]}}
+    git:read                           -> {"git_tools": {"read": ["*"]}}
+    git:read:write                     -> {"git_tools": {"read": ["*"], "write": ["*"]}}
+    file:read=*.py                     -> {"file_tools": {"read": ["*.py"]}}
+    file:read=README.md,doc/*.md       -> {"file_tools": {"read": ["README.md", "doc/*.md"]}}
+    file:read=README.md:write=*.new    -> {"file_tools": {"read": ["README.md"], "write": ["*.new"]}}
+    minishell:write=a.txt:delete=b.txt -> {"minishell_tools": {"write": ["a.txt"], "delete": ["b.txt"]}}
+
+    A bare module name grants read "*"; a bare capability grants "*";
+    cap= keeps the legacy empty pattern grant [""] (denies everything).
+    A pattern containing = is rejected: that was the legacy spelling of
+    a further capability (mod:cap1=p1,cap2=p2), which now takes a colon.
+    Multiple modules: repeat the --tools flag, one SPEC per module.
     """
     mapping: Dict[str, Dict[str, List[str]]] = {}
-    # (modkey, cap) of the last "mod:cap=pattern" item; lets a subsequent comma-
-    # separated bare pattern continue that pattern list instead of being misread
-    # as a module name.
-    last_spec = None
 
     def modkey(name: str) -> str:
         return name if name.endswith("_tools") else f"{name}_tools"
 
     for arg in args_list:
-        last_spec = None
-        for item in arg.split(","):
-            item = item.strip()
-            if not item:
+        arg = arg.strip()
+        if not arg:
+            continue
+        try:
+            parts = arg.split(":")
+            mk = modkey(parts[0].strip())
+            if len(parts) == 1:
+                # bare module name: read access to everything
+                mapping.setdefault(mk, {})["read"] = ["*"]
                 continue
-            try:
-                if "=" in item:
-                    # Formats: mod:cap=pat  or  mod:cap1=pat1:cap2=pat2
-                    if ":" in item:
-                        mod_name, rest = item.split(":", 1)
-                        mk = modkey(mod_name)
-                        segments = rest.split(":")
-                        for seg in segments:
-                            seg = seg.strip()
-                            if not seg:
-                                continue
-                            if "=" in seg:
-                                cap, pattern = seg.split("=", 1)
-                                cap = cap.strip()
-                                pattern = pattern.strip()
-                                last_spec = (mk, cap)
-                                mapping.setdefault(mk, {}).setdefault(cap, []).append(pattern)
-                            else:
-                                cap = seg
-                                last_spec = (mk, cap)
-                                mapping.setdefault(mk, {}).setdefault(cap, []).append("*")
-                    else:
-                        raise ValueError(f"Missing module in spec: {item}")
-                elif ":" in item:
-                    parts = item.split(":")
-                    for cap in parts[1:]:
-                        mapping.setdefault(modkey(parts[0]), {}).setdefault(cap.strip(), []).append("*")
-                    last_spec = None
-                elif last_spec is not None:
-                    # Continuation of the previous pattern list:
-                    # file:read=README.md,doc/*.md  (bare item appends to last spec)
-                    mapping[last_spec[0]][last_spec[1]].append(item)
+            for part in parts[1:]:
+                part = part.strip()
+                if not part:
+                    continue
+                if "=" in part:
+                    cap, raw_pats = part.split("=", 1)
+                    cap = cap.strip()
+                    pats = [p.strip() for p in raw_pats.split(",") if p.strip()]
+                    if not pats:
+                        # cap= -> empty pattern grant [""] (denies all),
+                        # same shape the legacy parser emitted
+                        pats = [""]
+                    bad = next((p for p in pats if "=" in p), None)
+                    if bad is not None:
+                        raise ValueError(
+                            f"pattern {bad!r} contains = - a comma separates patterns "
+                            f"within one capability; separate capabilities with a colon"
+                        )
                 else:
-                    mapping[modkey(item)] = {"read": ["*"]}   # bare name = read access
-                    last_spec = None
-            except ValueError:
-                logger.warning("Ignoring malformed --tools entry: %r", item)
-                last_spec = None
+                    cap, pats = part, ["*"]
+                if not cap:
+                    raise ValueError(f"empty capability name in {arg!r}")
+                mapping.setdefault(mk, {}).setdefault(cap, []).extend(pats)
+        except ValueError as e:
+            logger.warning("Ignoring malformed --tools entry %r: %s", arg, e)
     return mapping
 
 

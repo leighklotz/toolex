@@ -8,5 +8,27 @@ dependencies = [
     "libzim>=3.12.0",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Point to the src directory
+package-dir = {"" = "src"}
+
+# List the single-file modules
+py-modules = ["minishell_tools", "tooling", "toolex", "bash_tools", "file_tools", "git_tools", "weather_tools"]
+
+# List the packages (directories)
+packages = ["kiwix_tools"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.ruff]
 output-format = "concise"
