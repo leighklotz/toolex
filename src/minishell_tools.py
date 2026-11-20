@@ -87,7 +87,7 @@ import os
 import re
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Callable
 
@@ -379,233 +379,106 @@ class PodmanRunner:
 
 
 # ===========================================================================
-# Safety validators (shared pattern)
+# Safety validators
 # ===========================================================================
 
-# Known residual holes, accepted for v1 (hardening backlog):
-#   - GNU long-option abbreviation can alias banned options past these
-#     guards (e.g. --fil… matching --file=…).
-#   - sort may still spill to $TMPDIR; du's --files0-from list file is
-#     not path-checked.
-#   - Separated option values (e.g. head -n 5) can be mistaken for
-#     operands under patterned grants — false denials, fail-closed only.
-#   - Operand-less ls/du/find imply '.', which operand-based checks do
-#     not see (traversal itself is unchecked).
-
-def _reject(rest, bad, msg):
-    """Exact matches and prefix patterns (entries ending in '*')."""
-    prefixes = tuple(p[:-1] for p in bad if p.endswith("*"))
-    hit = [t for t in rest if t in bad or t.startswith(prefixes)]
-    if hit:
-        raise ValueError(f"{msg}: {', '.join(hit)}")
+@dataclass(frozen=True)
+class GuardConfig:
+    """Declarative configuration for command-line argument validation."""
+    banned_long: frozenset[str] = field(default_factory=frozenset)
+    banned_short: frozenset[str] = field(default_factory=frozenset)
+    banned_tokens: frozenset[str] = field(default_factory=frozenset)
+    max_positionals: int | None = None
+    deny_all_options: bool = False
+    options_with_args: frozenset[str] = field(default_factory=frozenset)
 
 
-def _guard_find(rest):
-    # bare '.' (and './') are ALLOWED: bounded by the 60 s stage timeout, the
-    # 100 KB truncation, and the predicate ban below. Denying '.' outright
-    # would break the single most common invocation, find . -name '*.py'.
-    _reject(rest, {"-delete", "-exec", "-execdir", "-ok", "-okdir",
-                   "-fprint", "-fprint0", "-fprintf", "-fls"},
-            "destructive find predicates are disabled (modify files with patch)")
+GUARD_CONFIGS = {
+    "find": GuardConfig(
+        banned_tokens={"-delete", "-exec", "-execdir", "-ok", "-okdir",
+                      "-fprint", "-fprint0", "-fprintf", "-fls"}
+    ),
+    "sed": GuardConfig(
+        banned_long={"--in-place", "--file"},
+        banned_short={"i", "f"},
+        options_with_args={"e", "l"}
+    ),
+    "sort": GuardConfig(
+        banned_long={"--output", "--compress-program", "--random-source",
+                     "--files0-from", "--temporary-directory"},
+        banned_short={"o", "T"},
+        options_with_args={"k", "t", "S"}
+    ),
+    "uniq": GuardConfig(
+        max_positionals=1,
+        options_with_args={"f", "s", "w"}
+    ),
+    "date": GuardConfig(
+        banned_tokens={"-s*", "--set*", "-f*", "--file*"}
+    ),
+    "grep": GuardConfig(
+        banned_long={"--file", "--exclude-from", "--include-from"},
+        banned_short={"f"},
+        options_with_args={"A", "B", "C", "e", "m"}
+    ),
+    "diff": GuardConfig(
+        banned_long={"--exclude-from", "--from-file", "--to-file"},
+        banned_short={"X"}
+    ),
+    "file": GuardConfig(
+        banned_long={"--files-from"},
+        banned_short={"f"}
+    ),
+    "rm": GuardConfig(deny_all_options=True),
+    "patch": GuardConfig(
+        banned_long={"strip", "directory", "output", "prefix", "suffix",
+                     "backup", "reject-file", "input"},
+        banned_short={"p", "b", "B", "d", "o", "z", "r", "i"}
+    ),
+}
 
 
-def _guard_sed(rest):
+def _validate_args(rest, cmd_name):
+    """Generic argument validator based on a declarative GuardConfig."""
+    config = GUARD_CONFIGS.get(cmd_name)
+    if not config:
+        return
+
+    positionals = 0
     i = 0
     while i < len(rest):
-        token = rest[i]
-        if token == "--":
+        tok = rest[i]
+        if tok == "--":
             break
-        if token.startswith("--"):
-            option = token.split("=", 1)[0]
-            if option != "--" and "--in-place".startswith(option):
-                raise ValueError(f"sed -i is disabled (use patch): {token}")
-            if option.startswith("--f") and "--file".startswith(option):
-                raise ValueError(f"sed --file is disabled (the script file "
-                                 f"would bypass path scoping): {token}")
-        if token.startswith("-") and not token.startswith("--") and token != "-":
-            group = token[1:]
-            for j, option in enumerate(group):
-                if option == "i":
-                    raise ValueError(f"sed -i is disabled (use patch): {token}")
-                if option == "f":
-                    raise ValueError(f"sed -f is disabled (the script file "
-                                     f"would bypass path scoping): {token}")
-                if option in {"e", "l"}:
-                    if j == len(group) - 1:
-                        i += 1
-                    break
-        i += 1
-
-
-def _guard_sort(rest):
-    i = 0
-    while i < len(rest):
-        token = rest[i]
-        if token == "--":
-            break
-        if token.startswith("--"):
-            option = token.split("=", 1)[0]
-            if option != "--" and any(
-                dangerous.startswith(option)
-                for dangerous in {"--output", "--compress-program",
-                                  "--random-source", "--files0-from",
-                                  "--temporary-directory"}
-            ):
-                if "--output".startswith(option):
-                    raise ValueError("sort -o is disabled (use | tee <file>)")
-                raise ValueError(f"sort {option} is disabled "
-                                 f"(reads or writes an unclassified path): {token}")
-        elif token.startswith("-") and token != "-":
-            group = token[1:]
-            j = 0
-            while j < len(group):
-                option = group[j]
-                if option == "o":
-                    raise ValueError("sort -o is disabled (use | tee <file>)")
-                if option == "T":
-                    raise ValueError(f"sort -T is disabled (writes temporary "
-                                     f"files outside the grant): {token}")
-                if option in {"k", "t", "S"}:
-                    if j == len(group) - 1:
-                        i += 1
-                    break
-                j += 1
-        i += 1
-
-
-def _guard_uniq(rest):
-    operands = []
-    i = 0
-    options = True
-    while i < len(rest):
-        token = rest[i]
-        if options and token == "--":
-            options = False
-        elif options and token.startswith("--"):
-            option = token.split("=", 1)[0]
-            if option in {"--skip-fields", "--skip-chars", "--check-chars"} and "=" not in token:
-                i += 1
-        elif options and token.startswith("-") and token != "-":
-            group = token[1:]
-            for j, option in enumerate(group):
-                if option in {"f", "s", "w"}:
-                    if j == len(group) - 1:
-                        i += 1
+        if config.deny_all_options and tok.startswith("-"):
+            raise ValueError(f"{cmd_name} options are disabled (single-file unlink only): {tok}")
+        if any(tok == b or (b.endswith("*") and tok.startswith(b[:-1]))
+               for b in config.banned_tokens):
+            raise ValueError(f"{cmd_name} token is disabled: {tok}")
+        if tok.startswith("--"):
+            opt = tok.split("=", 1)[0]
+            if any(opt.startswith(b) or b.startswith(opt) for b in config.banned_long):
+                raise ValueError(f"{cmd_name} option {opt} is disabled: {tok}")
+        elif tok.startswith("-") and tok != "-":
+            group = tok[1:]
+            if any(c in config.banned_short for c in group):
+                raise ValueError(f"{cmd_name} option is disabled: {tok}")
+            # Skip argument for options known to take one, to keep positional count accurate
+            for j, char in enumerate(group):
+                if char in config.options_with_args and j == len(group) - 1:
+                    i += 1
                     break
         else:
-            operands.append(token)
-            if len(operands) > 1:
-                raise ValueError("uniq output operands are disabled (read-only command)")
+            positionals += 1
+            if config.max_positionals is not None and positionals > config.max_positionals:
+                raise ValueError(f"{cmd_name} output operands are disabled (read-only command)")
         i += 1
-
-
-def _guard_date(rest):
-    # '*' catches attached forms: date --set=2024-01-01, date --file=/etc/dates
-    _reject(rest, {"-s", "-s*", "--set", "--set*",
-                   "-f", "-f*", "--file", "--file*"},
-            "date -s/-f are disabled (-s would set the clock; "
-            "-f reads an unclassified path)")
-    # date -r/--reference FILE (display FILE's mtime) stays allowed: metadata
-    # only, not contents — recorded as an accepted limitation.
-
-
-def _guard_grep(rest):
-    # -f/--file read the pattern list from a file; --exclude-from/--include-from
-    # read file lists — none of them are classified operands, so under a
-    # pattern-scoped grant they would read ungrant-checked paths.
-    i = 0
-    while i < len(rest):
-        token = rest[i]
-        if token == "--":
-            break
-        if token.startswith("--"):
-            option = token.split("=", 1)[0]
-            if option != "--" and any(
-                dangerous.startswith(option)
-                for dangerous in {"--file", "--exclude-from", "--include-from"}
-            ):
-                raise ValueError(f"grep {option} is disabled (reads an "
-                                 f"unclassified path): {token}")
-        elif token.startswith("-") and token != "-":
-            group = token[1:]
-            for j, option in enumerate(group):
-                if option == "f":
-                    raise ValueError(f"grep -f is disabled (reads an "
-                                     f"unclassified path): {token}")
-                if option in {"A", "B", "C", "e", "m"}:
-                    if j == len(group) - 1:
-                        i += 1
-                    break
-        i += 1
-
-
-def _guard_diff(rest):
-    # -X/--exclude-from read an exclude-pattern file; --from-file/--to-file
-    # take a path as an attached '=' value, which the positional classifier
-    # cannot see. ('-f' in diff is an output format, NOT a file read.)
-    _reject(rest, {"-X", "-X*",
-                   "--exclude-from", "--exclude-from*",
-                   "--from-file", "--from-file*",
-                   "--to-file", "--to-file*"},
-            "diff exclude/from-file options are disabled (read unclassified paths)")
-
-
-def _guard_file(rest):
-    # -f/--files-from read the list of filenames to examine — same class of
-    # bypass as sort --files0-from.
-    i = 0
-    while i < len(rest):
-        token = rest[i]
-        if token == "--":
-            break
-        if token.startswith("--"):
-            option = token.split("=", 1)[0]
-            if option != "--" and "--files-from".startswith(option):
-                raise ValueError(f"file -f is disabled (the file list would "
-                                 f"bypass path scoping): {token}")
-        elif token.startswith("-") and token != "-":
-            if "f" in token[1:]:
-                raise ValueError(f"file -f is disabled (the file list would "
-                                 f"bypass path scoping): {token}")
-        i += 1
-
-
-def _guard_rm(rest):
-    # rm is a single-file move to trash: EVERY '-'-prefixed token is rejected —
-    # short options (-r, -rf, -i, …), long options (--recursive, …), the
-    # bare stdin marker '-', and even the '--' terminator. The operand list
-    # therefore stays exactly one plain token, so the move source can
-    # never diverge from the path PathGuard checked (and a filename that
-    # begins with '-' is reachable as ./-file, as in tee's contract).
-    for tok in rest:
-        if tok.startswith("-"):
-            raise ValueError(f"rm options are disabled (single-file unlink only): {tok}")
 
 
 # --- patch header extraction (R11) ------------------------------------------
 
 _PATCH_BANNED_LONG = {"strip", "directory", "output", "prefix", "suffix",
                       "backup", "reject-file", "input"}
-
-
-def _guard_patch(rest):
-    # patch's target resolution and side-file behavior are pinned by its argv
-    # (-p1 --no-backup-if-mismatch --reject-file=/dev/null). These options
-    # would desynchronize the header extraction from what patch actually
-    # writes, or re-enable .orig/.rej side writes the extraction cannot see.
-    for tok in rest:
-        if tok == "--":
-            break
-        if tok.startswith("--"):
-            name = tok[2:].split("=", 1)[0]
-            if name in _PATCH_BANNED_LONG:
-                raise ValueError(f"option --{name} is disabled "
-                                 "(patch targets are authorized from the diff headers)")
-        elif tok.startswith("-") and tok != "-":
-            banned = [c for c in tok[1:] if c in "pbBdozri"]
-            if banned:
-                raise ValueError(f"option -{banned[0]} is disabled "
-                                 "(patch targets are authorized from the diff headers)")
 
 
 def _diff_operand(raw: str) -> str:
@@ -748,7 +621,7 @@ class PathGuard:
         fallback: a patterned write grant requires diff-header extraction
         and per-target validation. An unscoped write grant (['*']) scoped
         to the workspace still requires target validation to prevent
-        path-traversal escapes; only a true * anywhere grant skips all
+        path-traversal escapes; only a trueത് anywhere grant skips all
         target checks."""
         return self._write is not None and list(self._write[1]) != ["*"]
 
@@ -852,7 +725,7 @@ def _stat(args: str = "", stdin: str | None = None) -> CommandResult:
 
 
 @command("file", doc="Determine file type (-f/--files-from are disabled).",
-         read_paths="all_positionals", validate=_guard_file)
+         read_paths="all_positionals", validate=lambda r: _validate_args(r, "file"))
 def _file(args: str = "", stdin: str | None = None) -> CommandResult:
     raise NotImplementedError
 
@@ -894,13 +767,13 @@ def _wc(args: str = "", stdin: str | None = None) -> CommandResult:
 
 
 @command("uniq", doc="Report or omit repeated lines (input should be sorted; output files are disabled).",
-         consumes_stdin=True, validate=_guard_uniq, read_paths="positionals_after_nonfile")
+         consumes_stdin=True, validate=lambda r: _validate_args(r, "uniq"), read_paths="positionals_after_nonfile")
 def _uniq(args: str = "", stdin: str | None = None) -> CommandResult:
     raise NotImplementedError
 
 
 @command("diff", doc="Compare files line by line ('-' reads stdin; -X/--exclude-from and --from-file/--to-file are disabled).",
-         consumes_stdin=True, read_paths="positionals_after_nonfile", validate=_guard_diff)
+         consumes_stdin=True, read_paths="positionals_after_nonfile", validate=lambda r: _validate_args(r, "diff"))
 def _diff(args: str = "", stdin: str | None = None) -> CommandResult:
     raise NotImplementedError
 
@@ -909,7 +782,7 @@ def _diff(args: str = "", stdin: str | None = None) -> CommandResult:
 
 @command("grep", doc="Print lines matching a pattern: grep [-i -v -n -c -E -F] PATTERN [FILE...]",
          consumes_stdin=True, nonfile_operands=1,   # first positional is the pattern, rest are files
-         read_paths="positionals_after_nonfile", validate=_guard_grep)
+         read_paths="positionals_after_nonfile", validate=lambda r: _validate_args(r, "grep"))
 def _grep(args: str = "", stdin: str | None = None) -> CommandResult:
     raise NotImplementedError
 
@@ -917,7 +790,7 @@ def _grep(args: str = "", stdin: str | None = None) -> CommandResult:
 @command("sed", doc="Stream editor: sed 's/old/new/[g]' [FILE...]  (sandboxed: -i, -f, w, W, r, e disabled)",
          consumes_stdin=True, nonfile_operands=1,   # first positional is the script
          argv=("sed", "--sandbox"),                 # pinned before user tokens; GNU sed has no --no-sandbox
-         validate=_guard_sed, read_paths="positionals_after_nonfile")
+         validate=lambda r: _validate_args(r, "sed"), read_paths="positionals_after_nonfile")
 def _sed(args: str = "", stdin: str | None = None) -> CommandResult:
     raise NotImplementedError
 
@@ -935,7 +808,7 @@ def _tr(args: str = "", stdin: str | None = None) -> CommandResult:
 
 
 @command("sort", doc="Sort lines of text (-o and -T are disabled; use | tee <file>).",
-         consumes_stdin=True, read_paths="positionals_after_nonfile", validate=_guard_sort)
+         consumes_stdin=True, read_paths="positionals_after_nonfile", validate=lambda r: _validate_args(r, "sort"))
 def _sort(args: str = "", stdin: str | None = None) -> CommandResult:
     raise NotImplementedError
 
@@ -943,13 +816,13 @@ def _sort(args: str = "", stdin: str | None = None) -> CommandResult:
 # --- read · no stdin · validators --------------------------------------------
 
 @command("date", doc="Print the current date and time (-s/--set and -f/--file are disabled).",
-         validate=_guard_date)
+         validate=lambda r: _validate_args(r, "date"))
 def _date(args: str = "", stdin: str | None = None) -> CommandResult:
     raise NotImplementedError
 
 
 @command("find", doc="Search a directory tree: find . -name '*.py'  (destructive predicates disabled)",
-         validate=_guard_find, read_paths="leading_positionals")
+         validate=lambda r: _validate_args(r, "find"), read_paths="leading_positionals")
 def _find(args: str = "", stdin: str | None = None) -> CommandResult:
     raise NotImplementedError
 
@@ -1012,7 +885,7 @@ def _help(args: str = "", stdin: str | None = None) -> CommandResult:
          read_paths="all_positionals",      # the optional diff file operand (R11)
          write_paths="diff_headers",        # Change 11 extracts targets from ---/+++ headers
          argv=("patch", "-p1", "--no-backup-if-mismatch", "--reject-file=/dev/null"),
-         validate=_guard_patch)
+         validate=lambda r: _validate_args(r, "patch"))
 def _patch(args: str = "", stdin: str | None = None) -> CommandResult:
     raise NotImplementedError
 
@@ -1024,7 +897,7 @@ def _tee(args: str = "", stdin: str | None = None) -> CommandResult:
 
 
 @command("rm", doc="Move ONE file to .trash/ (no permanent delete, no directories, no recursion)",
-         caps="delete", native=True, delete_paths="all_positionals", validate=_guard_rm)
+         caps="delete", native=True, delete_paths="all_positionals", validate=lambda r: _validate_args(r, "rm"))
 def _rm(args: list[str] | None = None, stdin: str | None = None) -> CommandResult:
     # Native single-file move to .trash/ — the delete primitive for
     # delete-granted sessions (the truncation workaround is retired), with no
@@ -1556,3 +1429,4 @@ def shell(
 
 
 __all__ = discover_tools(globals(), __name__)
+
