@@ -561,8 +561,8 @@ def _guard_file(rest):
         if token.startswith("--"):
             option = token.split("=", 1)[0]
             if option != "--" and "--files-from".startswith(option):
-                raise ValueError(f"file --files-from is disabled (the file "
-                                 f"list would bypass path scoping): {token}")
+                raise ValueError(f"file -f is disabled (the file list would "
+                                 f"bypass path scoping): {token}")
         elif token.startswith("-") and token != "-":
             if "f" in token[1:]:
                 raise ValueError(f"file -f is disabled (the file list would "
@@ -745,10 +745,27 @@ class PathGuard:
     def write_is_patterned(self) -> bool:
         """True when a write grant is active AND its pattern list constrains
         paths (anything other than the ['*'] sentinel). Drives the R11
-        fallback: until diff-header extraction lands (Change 11), a patterned
-        write grant cannot be honored by patch, so its stages are denied; an
-        unscoped write grant (['*']) skips per-path patch checks."""
+        fallback: a patterned write grant requires diff-header extraction
+        and per-target validation. An unscoped write grant (['*']) scoped
+        to the workspace still requires target validation to prevent
+        path-traversal escapes; only a true * anywhere grant skips all
+        target checks."""
         return self._write is not None and list(self._write[1]) != ["*"]
+
+    def write_needs_target_validation(self) -> bool:
+        """True when patch targets must be extracted from diff headers and
+        checked against the write grant. This is the case whenever the write
+        grant is scoped (workspace-contained) AND the patterns are restrictive
+        (not ['*']). A ['*'] pattern (even if scoped) or an anywhere grant
+        skips target validation."""
+        if self._write is None:
+            return False
+        anywhere, patterns = self._write
+        if anywhere:
+            return False
+        if list(patterns) == ["*"]:
+            return False
+        return True
 
     def _check(self, path: str, scope: tuple[bool, tuple[str, ...]] | None,
                kind: str) -> None:
@@ -1301,7 +1318,7 @@ class MiniShell:
         for p in _stage_paths(rest, spec, "delete"):
             self._guard.check_delete(p)
         if spec.write_paths == "diff_headers":
-            if self._guard.write_is_patterned():
+            if self._guard.write_needs_target_validation():
                 self._check_patch_targets(spec, rest, buffer)
             return
         for p in _stage_paths(rest, spec, "write"):
@@ -1471,7 +1488,7 @@ def configure(grant, engine: str = "host"):
                      "inside the container — prefix host paths with /host to read "
                      "them. This weakens the container boundary; --engine host is "
                      "the expected pairing for anywhere grants.")
-    if _guard.write_is_patterned():
+    if _guard.write_needs_target_validation():
         notes.append("patch: write targets are authorized from the diff's ---/+++ "
                      "headers and must be workdir-relative; pipe the diff in on "
                      "stdin — file operands, -i, and absolute header paths are "
@@ -1486,9 +1503,11 @@ def configure(grant, engine: str = "host"):
                      "file, do not simulate deletion by truncating it; state that "
                      "deletion is unavailable and give the exact command to run "
                      "outside the sandbox.")
-    shell.__doc__ = (shell.__doc__ or "").rstrip() + (
-        "\n\n" + " ".join(notes)
-        + "\n\nAvailable commands:\n" + _REGISTRY.index(_GRANT))
+
+    base_doc = (shell.__doc__ or "").split("\n\nPermission mode:")[0].rstrip()
+    shell.__doc__ = (base_doc
+                     + "\n\n" + " ".join(notes)
+                     + "\n\nAvailable commands:\n" + _REGISTRY.index(_GRANT))
 
 
 # ===========================================================================

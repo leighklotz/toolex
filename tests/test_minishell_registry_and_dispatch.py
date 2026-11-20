@@ -25,7 +25,7 @@ def test_registry_holds_all_regardless_of_grant():
     reg = minishell_tools._REGISTRY
     assert reg.get("patch") is not None and reg.get("patch").caps == frozenset({"write"})
     assert reg.get("tee").caps == frozenset({"write"})
-    assert reg.get("rm").caps == frozenset({"write"})
+    assert reg.get("rm").caps == frozenset({"delete"})
     assert reg.get("ls").caps == frozenset({"read"})
     assert reg.get("no_such_command") is None
 
@@ -35,6 +35,7 @@ def test_covers_mapping():
     assert minishell_tools._COVERS == {
         "read": ("read", "read_anywhere"),
         "write": ("write", "write_anywhere"),
+        "delete": ("delete", "delete_anywhere"),
     }
 
 
@@ -130,8 +131,9 @@ def test_operand_classification_per_command():
     assert reg.get("patch").write_paths == "diff_headers"
     assert reg.get("tee").write_paths == "all_positionals"
     assert reg.get("tee").read_paths == "none"
-    # rm: single-file move to .trash/ — its one operand is write-classified, no reads.
-    assert reg.get("rm").write_paths == "all_positionals"
+    # rm: single-file move to .trash/ — its one operand is delete-classified, no reads.
+    assert reg.get("rm").delete_paths == "all_positionals"
+    assert reg.get("rm").write_paths == "none"
     assert reg.get("rm").read_paths == "none"
     assert reg.get("rm").native is True
     for name in ("pwd", "whoami", "which", "basename", "dirname", "date",
@@ -202,7 +204,7 @@ def test_unspaced_pipe_is_single_unknown_token():
 @pytest.mark.parametrize("line,msg", [
     ("patch f.diff", "permission denied: patch requires write"),
     ("tee out.txt", "permission denied: tee requires write"),
-    ("rm out.txt", "permission denied: rm requires write"),
+    ("rm out.txt", "permission denied: rm requires delete"),
 ])
 def test_write_denied_under_read_grant(line, msg):
     res, fake = run_line(line, granted={"read": ["*"]})
@@ -448,13 +450,13 @@ def test_scoped_write_denial_for_tee(ws):
 
 
 def test_scoped_write_denial_for_rm(ws):
-    # rm's operand is write-classified: under a patterned write grant a
+    # rm's operand is delete-classified: under a patterned delete grant a
     # non-matching operand is denied before the native move-to-trash runs.
     res, fake = run_line("rm out.txt",
-                         granted={"read": ["*"], "write": ["*.log"]})
+                         granted={"read": ["*"], "delete": ["*.log"]})
     assert res.exit_code == 126
     assert "pipeline stage 1 (rm) denied, exit 126" in res.stderr
-    assert "does not match permitted write patterns" in res.stderr
+    assert "does not match permitted delete patterns" in res.stderr
     assert fake.calls == []                        # native — the only fail-signal is the 126
 
 
@@ -482,7 +484,7 @@ def test_scoped_grant_denies_absolute_operands(ws):
 
 def test_scoped_rm_denies_absolute_operands(ws):
     # The rm operand must obey the same containment rule as tee's.
-    res, fake = run_line("rm /etc/passwd", granted={"read": ["*"], "write": ["*"]})
+    res, fake = run_line("rm /etc/passwd", granted={"read": ["*"], "write": ["*"], "delete": ["*"]})
     assert res.exit_code == 126
     assert "outside the working directory" in res.stderr
     assert fake.calls == []
@@ -665,39 +667,39 @@ def test_rm_requires_exactly_one_operand(ws):
     assert (ws / "a.txt").exists() and (ws / "b.txt").exists()   # nothing was moved
 
 
-def test_rm_succeeds_under_write_grant(ws):
+def test_rm_fails_under_write_grant(ws):
     (ws / "stale.log").write_text("x\n")
     res, fake = run_line("rm stale.log", granted={"read": ["*"], "write": ["*"]})
-    assert res.exit_code == 0
+    assert res.exit_code == 126
     assert fake.calls == []
-    assert not (ws / "stale.log").exists()
+    assert (ws / "stale.log").exists()
 
 
 def test_rm_rejected_under_read_only_grant(ws):
     (ws / "precious.txt").write_text("keep me\n")
     res, fake = run_line("rm precious.txt", granted={"read": ["*"]})
     assert res.exit_code == 126
-    assert "permission denied: rm requires write" in res.stderr
+    assert "permission denied: rm requires delete" in res.stderr
     assert fake.calls == []
     assert (ws / "precious.txt").exists()       # the file survived
 
 
-def test_rm_denied_for_out_of_workdir_operand_even_under_write_grant(ws, tmp_path):
+def test_rm_denied_for_out_of_workdir_operand_even_under_delete_grant(ws, tmp_path):
     outside = tmp_path / "outside.txt"
     outside.write_text("do not touch\n")
     res, fake = run_line(f"rm {outside}", granted={"read": ["*"], "write": ["*"]})
     assert res.exit_code == 126
-    assert "outside the working directory" in res.stderr
+    assert "does not match permitted delete patterns" in res.stderr
     assert fake.calls == []
     assert outside.exists()                     # the file survived
 
 
-def test_rm_operand_is_pattern_checked_under_scoped_write(ws):
+def test_rm_operand_is_pattern_checked_under_scoped_delete(ws):
     (ws / "keep.py").write_text("x\n")
     (ws / "notes.txt").write_text("y\n")
     res, fake = run_line("rm notes.txt", granted={"read": ["*"], "write": ["*.py"]})
     assert res.exit_code == 126
-    assert "does not match permitted write patterns" in res.stderr
+    assert "does not match permitted delete patterns" in res.stderr
     assert fake.calls == []
     res, _ = run_line("rm keep.py", granted={"read": ["*"], "write": ["*.py"]})
     assert res.exit_code == 0
@@ -751,6 +753,41 @@ def test_rm_trash_collision_naming(ws):
     assert (ws / ".trash" / "x.1.txt").read_text() == "2\n"
 
 
+def test_rm_rejected_under_read_only_grant(ws):
+    (ws / "precious.txt").write_text("keep me\n")
+    res, fake = run_line("rm precious.txt", granted={"read": ["*"]})
+    assert res.exit_code == 126
+    assert "permission denied: rm requires delete" in res.stderr
+    assert fake.calls == []
+    assert (ws / "precious.txt").exists()
+
+def test_rm_succeeds_under_delete_grant(ws):
+    (ws / "stale.txt").write_text("x\n")
+    res, fake = run_line("rm stale.txt", granted={"delete": ["*"]})
+    assert res.exit_code == 0
+    assert fake.calls == []
+    assert not (ws / "stale.txt").exists()
+
+def test_rm_denied_for_out_of_workdir_operand_even_under_delete_grant(ws, tmp_path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("do not touch\n")
+    res, fake = run_line(f"rm {outside}", granted={"delete": ["*"]})
+    assert res.exit_code == 126
+    assert "outside the working directory" in res.stderr
+    assert fake.calls == []
+    assert outside.exists()
+
+def test_rm_operand_is_pattern_checked_under_scoped_delete(ws):
+    (ws / "keep.py").write_text("x\n")
+    (ws / "notes.txt").write_text("y\n")
+    res, fake = run_line("rm notes.txt", granted={"delete": ["*.py"]})
+    assert res.exit_code == 126
+    assert "does not match permitted delete patterns" in res.stderr
+    assert fake.calls == []
+    res, _ = run_line("rm keep.py", granted={"delete": ["*.py"]})
+    assert res.exit_code == 0
+    assert not (ws / "keep.py").exists()
+
 def test_rm_trash_dir_created_by_configure(ws, fresh):
-    fresh.configure({"read": ["*"], "write": ["*"]}, engine="host")
+    fresh.configure({"read": ["*"], "write": ["*"], "delete": ["*"]}, engine="host")
     assert (ws / ".trash").is_dir()

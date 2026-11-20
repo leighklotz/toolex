@@ -41,8 +41,10 @@ def test_configure_rewrites_shell_docstring(fresh):
     fresh.configure({"*": ["*"]}, engine="host")
     assert "Available commands:" in fresh.shell.__doc__
     # Change 7/12: the wildcard grant reads as ANYWHERE for both families.
-    assert "Permission mode: read anywhere; write anywhere." in fresh.shell.__doc__
-
+    assert "Capabilities:" in fresh.shell.__doc__
+    assert "read_anywhere" in fresh.shell.__doc__
+    assert "write_anywhere" in fresh.shell.__doc__
+    assert "delete_anywhere" in fresh.shell.__doc__
 
 def test_configure_banner_states_scoped_patterns_and_disabled(fresh):
     fresh.configure({"read": ["*.py"]}, engine="host")
@@ -85,7 +87,7 @@ def test_static_docstring_carries_the_never_approximate_line(fresh):
     assert "provide the exact command to run outside the sandbox" in doc
 
 
-def test_no_delete_primitive_note_in_read_only_absent_in_write(fresh):
+def test_no_delete_primitive_note_in_read_only_absent_in_delete(fresh):
     # Mode-conditional guardrail: read-only sessions have no delete primitive,
     # so the banner must warn against truncation-as-deletion; a write-granted
     # session HAS rm (move to .trash/), so the note would be false and must be
@@ -94,7 +96,13 @@ def test_no_delete_primitive_note_in_read_only_absent_in_write(fresh):
     assert "no delete primitive" in (fresh.shell.__doc__ or "")
     assert "do not simulate deletion by truncating it" in (fresh.shell.__doc__ or "")
 
-    fresh.configure({"read": ["*"], "write": ["*"]}, engine="host")
+    fresh.configure({"read": ["*"], "delete": ["*"]}, engine="host")
+    print(f"*** doc={fresh.shell.__doc__}")
+    if "no delete primitive" in fresh.shell.__doc__:
+        print("*** YES YES ***")
+    else:
+        print("*** NO NO ***")        
+
     assert "no delete primitive" not in (fresh.shell.__doc__ or "")
     assert "rm moves files to .trash/" in (fresh.shell.__doc__ or "")
 
@@ -165,7 +173,7 @@ def test_shell_tool_declares_self_scoped_any_cap():
     assert shell._is_toolex_tool is True
     assert shell._self_scoped is True
     assert shell._cap_match == "any"
-    assert shell._required_caps == {"read", "read_anywhere", "write", "write_anywhere"}
+    assert shell._required_caps == {"read", "read_anywhere", "write", "write_anywhere", "delete", "delete_anywhere"}
     assert shell._path_args == frozenset()
 
 
