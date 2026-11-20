@@ -2,7 +2,8 @@
 
 SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE}")")"
 ANSWER_DIR="$(dirname "$(realpath "${BASH_SOURCE}")")/../answer"
-source "${ANSWER_DIR}/functions.sh"
+source "${ANSWER_DIR}/bin/commands/hx-bootstrap.sh"
+hx core
 
 # PROMPT='Use `git status` and `git diff` and analyze the results to output a bash fence containing a git commit command to commit the staged and unstaged changes. Summarize the impact/import of the changes in the first message line. Write a detailed, imperative message with multiple vertically aligned `-m` flags summarizing specific changes. Properly quote the bash strings. Ignore untracked files. If there are no changes to commit, output `echo no changes` instead of a `git commit` command.'
 
