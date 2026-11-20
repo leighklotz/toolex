@@ -5,16 +5,20 @@
 `toolex` is designed to be a part of [`answer`](https://github.com/leighklotz/answer). Below is standalone documentation.
 
 ## Project layout
-
 ```text
- ├── bash_tools.py        # shell utilities (ls, pwd, command execution, …)
- ├── file_tools.py        # file read/write/edit/search with path-pattern grants
- ├── git_tools.py         # git utilities (status, diff, commit, …)
- ├── minishell_tools.py   # pipe-only mini shell exposed as one LLM tool
- ├── test_minishell.py    # pytest suite for minishell + toolex integration
- ├── toolex.py / toolex.sh
- ├── tooling.py           # @tool decorator, host/podman runners, discover_tools
- └── weather_tools.py
+├── src/
+│   ├── bash_tools.py      # shell utilities (ls, pwd, command execution, …)
+│   ├── file_tools.py      # file read/write/edit/search with path-pattern grants
+│   ├── git_tools.py       # git utilities (status, diff, commit, …)
+│   ├── minishell_tools.py # pipe-only mini shell exposed as one LLM tool
+│   ├── toolex.py          # CLI entry point and tool orchestration
+│   ├── tooling.py         # @tool decorator, host/podman runners
+│   └── weather_tools.py
+├── tests/                 # Modularized pytest suite
+│   ├── conftest.py        # Shared fixtures and helpers
+│   └── ...                 # Dedicated test files (parser, registry, etc.)
+├── toolex.sh              # Convenience wrapper
+└── pyproject.toml         # Project configuration and dependencies
 ```
 
 * `tooling.py` – defines the `@tool` decorator helpers.
