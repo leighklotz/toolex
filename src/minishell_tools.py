@@ -1258,7 +1258,9 @@ class MiniShell:
             try:
                 self._check_stage_paths(spec, rest, buffer)
             except PermissionError as e:
-                return CommandResult("", f"pipeline stage {i} ({name}) denied, exit 126\n{e}", 126)
+                fail_msg = f"pipeline stage {i} ({name}) denied, exit 126\n{e}"
+                emit_invocation("❌️", fail_msg)
+                return CommandResult("", fail_msg, 126)
             if spec.native:
                 res = _call(spec.func, rest, buffer)
             else:
