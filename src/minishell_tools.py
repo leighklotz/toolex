@@ -1551,7 +1551,7 @@ def shell(
     allowed patterns. The banner below (added when toolex configures the
     session) states the active mode and patterns.
     """
-    emit_invocation("🥥", command_line=command_line)
+    emit_invocation("🥥", command_line)
     return MiniShell(_REGISTRY, _runner, _GRANT, _guard).execute(command_line)
 
 

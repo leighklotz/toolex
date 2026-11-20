@@ -6,7 +6,7 @@ import os
 import sys
 import subprocess
 import shlex
-from typing import Dict, List, Optional, Any, Union, Callable
+from typing import Dict, List, Optional, Any, Callable
 from functools import wraps
 
 
@@ -97,7 +97,6 @@ def bash_wrap(name: str, cmd: List[str]):
     def decorator(f: Callable) -> Callable:
         @wraps(f)
         def wrapper(*args, **kwargs) -> Dict[str, Any]:
-            cmd_label = " ".join(cmd)
             payload = None
             if args and not isinstance(args[0], (dict, list)):
                 payload = args[0]
@@ -183,12 +182,23 @@ def discover_tools(namespace: Dict[str, Any], module_name: str) -> List[str]:
     ]
 
 # --- EVENG LOGGING ---
-def emit_invocation(tool_icon: str, **kwargs) -> None:
-    """Print one text fragment to stderr:  🤖<icon> key="val" key2="val2"
-    Strings are double-quoted; bools become true/false; everything else is repr'd.
+def emit_invocation(tool_icon: str, *args, **kwargs) -> None:
+    """Print one text fragment to stderr:  🤖<icon> [bare_val] key="val"
+    Positional args are printed as bare values; kwargs are printed as key="val".
     """
     robot = "🤖"
     parts = []
+
+    # 1. Handle bare values (positional args)
+    for v in args:
+        if isinstance(v, str):
+            parts.append(f'{v}')
+        elif isinstance(v, bool):
+            parts.append('true' if v else 'false')
+        else:
+            parts.append(f"{v!r}")
+
+    # 2. Handle labeled values (keyword args)
     for k, v in kwargs.items():
         if isinstance(v, str):
             parts.append(f'{k}="{v}"')
@@ -196,5 +206,7 @@ def emit_invocation(tool_icon: str, **kwargs) -> None:
             parts.append(f"{k}={'true' if v else 'false'}")
         else:
             parts.append(f"{k}={v!r}")
+
     line = f"{robot}{tool_icon} {' '.join(parts)}"
     print(line, file=sys.stderr, flush=True, end='')
+
