@@ -676,156 +676,8 @@ class PathGuard:
 
 
 # ===========================================================================
-# Commands — 29 total, one decorator each. The index renders at ~2.4 KB
-# (grant header and disabled list included), under the 4 KB schema cap.
-# Trimming the set is deleting a decorator.
-#
-# Runner-command bodies are NEVER executed: the interpreter dispatches them
-# through a Runner using spec.argv (+ parsed tokens), not func. Each stub
-# exists so @command has a function to annotate; doc= feeds the index.
-# Native commands (echo, printf, help, rm) are the exception: their func
-# runs in-process.
+# Commands
 # ===========================================================================
-
-# --- read · no stdin -------------------------------------------------------
-
-@command("ls", doc="List directory contents.", read_paths="all_positionals")
-def _ls(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("pwd", doc="Print the current working directory.")
-def _pwd(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("whoami", doc="Print the effective user name.")
-def _whoami(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("which", doc="Locate a command in PATH.")
-def _which(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("basename", doc="Strip directory and optional suffix from a filename.")
-def _basename(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("dirname", doc="Strip the last component from a filename.")
-def _dirname(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("stat", doc="Display file or filesystem status.", read_paths="all_positionals")
-def _stat(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("file", doc="Determine file type (-f/--files-from are disabled).",
-         read_paths="all_positionals", validate=lambda r: _validate_args(r, "file"))
-def _file(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("du", doc="Estimate file and directory space usage.", read_paths="all_positionals")
-def _du(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("df", doc="Report filesystem disk space usage.", read_paths="all_positionals")
-def _df(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-# --- read · consume stdin · operands are files ------------------------------
-
-@command("cat", doc="Concatenate files to stdout.", consumes_stdin=True,
-         read_paths="positionals_after_nonfile")
-def _cat(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("head", doc="Print the first lines of each file (default 10).", consumes_stdin=True,
-         read_paths="positionals_after_nonfile")
-def _head(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("tail", doc="Print the last lines of each file (default 10).", consumes_stdin=True,
-         read_paths="positionals_after_nonfile")
-def _tail(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("wc", doc="Count lines, words, and bytes.", consumes_stdin=True,
-         read_paths="positionals_after_nonfile")
-def _wc(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("uniq", doc="Report or omit repeated lines (input should be sorted; output files are disabled).",
-         consumes_stdin=True, validate=lambda r: _validate_args(r, "uniq"), read_paths="positionals_after_nonfile")
-def _uniq(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("diff", doc="Compare files line by line ('-' reads stdin; -X/--exclude-from and --from-file/--to-file are disabled).",
-         consumes_stdin=True, read_paths="positionals_after_nonfile", validate=lambda r: _validate_args(r, "diff"))
-def _diff(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-# --- read · consume stdin · special operand shapes / validators --------------
-
-@command("grep", doc="Print lines matching a pattern: grep [-i -v -n -c -E -F] PATTERN [FILE...]",
-         consumes_stdin=True, nonfile_operands=1,   # first positional is the pattern, rest are files
-         read_paths="positionals_after_nonfile", validate=lambda r: _validate_args(r, "grep"))
-def _grep(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("sed", doc="Stream editor: sed 's/old/new/[g]' [FILE...]  (sandboxed: -i, -f, w, W, r, e disabled)",
-         consumes_stdin=True, nonfile_operands=1,   # first positional is the script
-         argv=("sed", "--sandbox"),                 # pinned before user tokens; GNU sed has no --no-sandbox
-         validate=lambda r: _validate_args(r, "sed"), read_paths="positionals_after_nonfile")
-def _sed(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("cut", doc="Extract fields or characters per line; stdin-only in v1 — pipe into it.",
-         consumes_stdin=True)
-def _cut(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("tr", doc="Translate, squeeze, or delete characters; stdin-only in v1 — pipe into it.",
-         consumes_stdin=True)
-def _tr(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("sort", doc="Sort lines of text (-o and -T are disabled; use | tee <file>).",
-         consumes_stdin=True, read_paths="positionals_after_nonfile", validate=lambda r: _validate_args(r, "sort"))
-def _sort(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-# --- read · no stdin · validators --------------------------------------------
-
-@command("date", doc="Print the current date and time (-s/--set and -f/--file are disabled).",
-         validate=lambda r: _validate_args(r, "date"))
-def _date(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("find", doc="Search a directory tree: find . -name '*.py'  (destructive predicates disabled)",
-         validate=lambda r: _validate_args(r, "find"), read_paths="leading_positionals")
-def _find(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
 
 # --- native builtins — the func hook is the extension point for future
 #     pure-Python filters.
@@ -878,50 +730,22 @@ def _help(args: str = "", stdin: str | None = None) -> CommandResult:
     return CommandResult(_REGISTRY.index(_GRANT, limit=None) + "\n", "", 0)
 
 
-# --- write / delete — the mutating commands in v1 ------------------------------
-
-@command("patch", doc="Apply a unified diff to files (pipe the diff in; under a patterned write grant every diff-header target is checked)",
-         caps="write", consumes_stdin=True,
-         read_paths="all_positionals",      # the optional diff file operand (R11)
-         write_paths="diff_headers",        # Change 11 extracts targets from ---/+++ headers
-         argv=("patch", "-p1", "--no-backup-if-mismatch", "--reject-file=/dev/null"),
-         validate=lambda r: _validate_args(r, "patch"))
-def _patch(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
-@command("tee", doc="Write piped input to a file and to stdout.",
-         caps="write", consumes_stdin=True, write_paths="all_positionals")
-def _tee(args: str = "", stdin: str | None = None) -> CommandResult:
-    raise NotImplementedError
-
-
 @command("rm", doc="Move ONE file to .trash/ (no permanent delete, no directories, no recursion)",
          caps="delete", native=True, delete_paths="all_positionals", validate=lambda r: _validate_args(r, "rm"))
 def _rm(args: list[str] | None = None, stdin: str | None = None) -> CommandResult:
-    # Native single-file move to .trash/ — the delete primitive for
-    # delete-granted sessions (the truncation workaround is retired), with no
-    # in-sandbox permanent delete. Exactly one operand: no -r/-rf, no
-    # directory recursion. The validator has already refused every
-    # '-...'-token, so the single operand here is byte-identical to the one
-    # PathGuard checked. Relative operands are anchored at the workspace —
-    # native commands run in-process, so there is no runner cwd to inherit;
-    # _WORKSPACE is the same root PathGuard anchored at construction time.
     toks = args or []
-    if len(toks) != 1 or toks[0].startswith("-"):   # startswith: defense in depth
+    if len(toks) != 1 or toks[0].startswith("-"):
         return CommandResult("", "rm: exactly one file operand is required "
                                   "(single-file unlink only)", 1)
     target = Path(toks[0])
     if not target.is_absolute():
         target = Path(_WORKSPACE) / target
 
-    # Reject anything already inside .trash/ — there is no purge; the only
-    # way to destroy the data is outside the sandbox.
     trash_root = Path(_WORKSPACE) / _TRASH_DIR
     try:
         target.relative_to(trash_root)
     except ValueError:
-        pass        # not under .trash — normal path, proceed
+        pass
     else:
         return CommandResult(
             "",
@@ -1258,9 +1082,7 @@ class MiniShell:
             try:
                 self._check_stage_paths(spec, rest, buffer)
             except PermissionError as e:
-                fail_msg = f"pipeline stage {i} ({name}) denied, exit 126\n{e}"
-                emit_invocation("❌️", fail_msg)
-                return CommandResult("", fail_msg, 126)
+                return CommandResult("", f"pipeline stage {i} ({name}) denied, exit 126\n{e}", 126)
             if spec.native:
                 res = _call(spec.func, rest, buffer)
             else:
@@ -1279,17 +1101,74 @@ class MiniShell:
 
 
 # ===========================================================================
-# Assembly (the whole integration layer)
+# Assembly
 # ===========================================================================
 
-# Placement: the _REGISTRY assignment must come AFTER the last @command
-# definition in the file — it scans the module namespace at import time.
-
+# 1. Registry from native function namespace
 _REGISTRY: CommandRegistry = CommandRegistry.from_namespace(dict(globals()))
 
+# 2. Data-driven registration of Runner commands (Binary wrappers)
+_BINARY_DEFS = [
+    {"name": "ls", "doc": "List directory contents.", "read_paths": "all_positionals"},
+    {"name": "pwd", "doc": "Print the current working directory."},
+    {"name": "whoami", "doc": "Print the effective user name."},
+    {"name": "which", "doc": "Locate a command in PATH."},
+    {"name": "basename", "doc": "Strip directory and optional suffix from a filename."},
+    {"name": "dirname", "doc": "Strip the last component from a filename."},
+    {"name": "stat", "doc": "Display file or filesystem status.", "read_paths": "all_positionals"},
+    {"name": "file", "doc": "Determine file type (-f/--files-from are disabled).",
+     "read_paths": "all_positionals", "validate": lambda r: _validate_args(r, "file")},
+    {"name": "du", "doc": "Estimate file and directory space usage.", "read_paths": "all_positionals"},
+    {"name": "df", "doc": "Report filesystem disk space usage.", "read_paths": "all_positionals"},
+    {"name": "cat", "doc": "Concatenate files to stdout.", "consumes_stdin": True,
+     "read_paths": "positionals_after_nonfile"},
+    {"name": "head", "doc": "Print the first lines of each file (default 10).", "consumes_stdin": True,
+     "read_paths": "positionals_after_nonfile"},
+    {"name": "tail", "doc": "Print the last lines of each file (default 10).", "consumes_stdin": True,
+     "read_paths": "positionals_after_nonfile"},
+    {"name": "wc", "doc": "Count lines, words, and bytes.", "consumes_stdin": True,
+     "read_paths": "positionals_after_nonfile"},
+    {"name": "uniq", "doc": "Report or omit repeated lines (input should be sorted; output files are disabled).",
+     "consumes_stdin": True, "validate": lambda r: _validate_args(r, "uniq"), "read_paths": "positionals_after_nonfile"},
+    {"name": "diff", "doc": "Compare files line by line ('-' reads stdin; -X/--exclude-from and --from-file/--to-file are disabled).",
+     "consumes_stdin": True, "read_paths": "positionals_after_nonfile", "validate": lambda r: _validate_args(r, "diff")},
+    {"name": "grep", "doc": "Print lines matching a pattern: grep [-i -v -n -c -E -F] PATTERN [FILE...]",
+     "consumes_stdin": True, "nonfile_operands": 1, "read_paths": "positionals_after_nonfile", "validate": lambda r: _validate_args(r, "grep")},
+    {"name": "sed", "doc": "Stream editor: sed 's/old/new/[g]' [FILE...] (sandboxed: -i, -f, w, W, r, e disabled)",
+     "consumes_stdin": True, "nonfile_operands": 1, "argv": ("sed", "--sandbox"),
+     "validate": lambda r: _validate_args(r, "sed"), "read_paths": "positionals_after_nonfile"},
+    {"name": "cut", "doc": "Extract fields or characters per line; stdin-only in v1 — pipe into it.", "consumes_stdin": True},
+    {"name": "tr", "doc": "Translate, squeeze, or delete characters; stdin-only in v1 — pipe into it.", "consumes_stdin": True},
+    {"name": "sort", "doc": "Sort lines of text (-o and -T are disabled; use | tee <file>).",
+     "consumes_stdin": True, "read_paths": "positionals_after_nonfile", "validate": lambda r: _validate_args(r, "sort")},
+    {"name": "date", "doc": "Print the current date and time (-s/--set and -f/--file are disabled).",
+     "validate": lambda r: _validate_args(r, "date")},
+    {"name": "find", "doc": "Search a directory tree: find . -name '*.py' (destructive predicates disabled)",
+     "validate": lambda r: _validate_args(r, "find"), "read_paths": "leading_positionals"},
+    {"name": "patch", "doc": "Apply a unified diff to files (pipe the diff in; under a patterned write grant every diff-header target is checked)",
+     "caps": "write", "consumes_stdin": True, "read_paths": "all_positionals", "write_paths": "diff_headers",
+     "argv": ("patch", "-p1", "--no-backup-if-mismatch", "--reject-file=/dev/null"), "validate": lambda r: _validate_args(r, "patch")},
+    {"name": "tee", "doc": "Write piped input to a file and to stdout.", "caps": "write", "consumes_stdin": True, "write_paths": "all_positionals"},
+]
+
+for d in _BINARY_DEFS:
+    name = d["name"]
+    _REGISTRY.register(CommandSpec(
+        name=name,
+        doc=d["doc"],
+        caps=frozenset(d.get("caps", "read").split()),
+        consumes_stdin=d.get("consumes_stdin", False),
+        nonfile_operands=d.get("nonfile_operands", 0),
+        read_paths=d.get("read_paths", "none"),
+        write_paths=d.get("write_paths", "none"),
+        delete_paths=d.get("delete_paths", "none"),
+        argv=tuple(d["argv"]) if "argv" in d else (name,),
+        native=False,
+        func=None,
+        validate=d.get("validate")
+    ))
+
 # Single source of truth for permissions (R4): cap name -> glob patterns.
-# '*' (toolex's 'all') carries ["*"]. Permissive until toolex configures
-# (tests, standalone); PathGuard is built from the same dict.
 _GRANT: dict[str, list[str]] = {"*": ["*"]}
 _guard: PathGuard = PathGuard(_GRANT)
 _runner: HostRunner | PodmanRunner = HostRunner()
@@ -1317,24 +1196,7 @@ def _scope_phrase(verb: str, scope: tuple[bool, list[str]] | None) -> str | None
 
 
 def configure(grant, engine: str = "host"):
-    """Called once by toolex after module load, BEFORE tool schemas are built.
-
-    `grant` maps capability names (read, read_anywhere, write,
-    write_anywhere, delete, delete_anywhere, or `*` for the CLI's `all`) to
-    fnmatch pattern lists. _as_grant normalizes it and fails closed: a
-    non-dict (e.g. an older toolex passing a frozenset) yields an empty
-    grant — nothing permitted. `write_anywhere` + podman raises ValueError
-    (toolex exits 2) BEFORE any module state is touched.
-
-    Effects: installs _GRANT, _guard (PathGuard), and _runner; appends a
-    permission banner (scope phrases for read, write, and delete, the
-    disabled command list, the podman `/host` note when applicable, the
-    scoped-patch instruction when the write grant is patterned, the rm→.trash
-    note (with eager .trash/ creation) when a delete grant is active, and the
-    no-delete-primitive note when no delete grant is active) plus the granted
-    command index to the shell tool's docstring, so the LLM sees the
-    effective scope before acting — no set-difference inference required.
-    """
+    """Called once by toolex after module load, BEFORE tool schemas are built."""
     global _GRANT, _guard, _runner, shell
     grant = _as_grant(grant)
     if "write_anywhere" in grant and engine == "podman":
