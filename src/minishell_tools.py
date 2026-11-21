@@ -75,7 +75,7 @@ skipped. With an unpatterned write grant no header parsing happens.
 
 Standalone smoke test (no toolex involved; permissive default grant):
 
-    python -c "import minishell_tools as m; print(m._REGISTRY.index(m._GRANT))"
+    python -c "import minishell_tools as m; print(m._REGISTRY.index(m._CONTEXT.grant))"
 """
 
 from __future__ import annotations
@@ -621,7 +621,7 @@ class PathGuard:
         fallback: a patterned write grant requires diff-header extraction
         and per-target validation. An unscoped write grant (['*']) scoped
         to the workspace still requires target validation to prevent
-        path-traversal escapes; only a trueത് anywhere grant skips all
+        path-traversal escapes; only a true anywhere grant skips all
         target checks."""
         return self._write is not None and list(self._write[1]) != ["*"]
 
@@ -673,6 +673,14 @@ class PathGuard:
             raise PermissionError(
                 f"Access Denied: {path!r} resolves to {candidate!r}, which does "
                 f"not match permitted {kind} patterns {sorted(patterns)}")
+
+
+@dataclass(frozen=True)
+class SessionContext:
+    """Bundles the state of the active shell session."""
+    grant: dict[str, list[str]]
+    guard: PathGuard
+    runner: HostRunner | PodmanRunner
 
 
 # ===========================================================================
@@ -727,7 +735,7 @@ def _printf(args: list[str] | None = None, stdin: str | None = None) -> CommandR
 def _help(args: str = "", stdin: str | None = None) -> CommandResult:
     # limit=None: the schema-embedded index truncates at 4096 with the hint
     # "run 'help' for the full list" — help must be able to that promise.
-    return CommandResult(_REGISTRY.index(_GRANT, limit=None) + "\n", "", 0)
+    return CommandResult(_REGISTRY.index(_CONTEXT.grant, limit=None) + "\n", "", 0)
 
 
 @command("rm", doc="Move ONE file to .trash/ (no permanent delete, no directories, no recursion)",
@@ -1005,11 +1013,11 @@ class MiniShell:
     """Pipe-only interpreter: quote-aware tokenization, '|' stage splitting,
     per-stage dispatch through CommandSpecs, fail-fast error reporting."""
 
-    def __init__(self, registry, runner, grant, guard):
+    def __init__(self, registry: CommandRegistry, context: SessionContext):
         self._reg = registry
-        self._runner = runner
-        self._grant = grant
-        self._guard = guard
+        self._runner = context.runner
+        self._grant = context.grant
+        self._guard = context.guard
 
     def _check_stage_paths(self, spec, rest, buffer=None):
         for p in _stage_paths(rest, spec, "read"):
@@ -1173,15 +1181,18 @@ for d in _BINARY_DEFS:
     ))
 
 # Single source of truth for permissions (R4): cap name -> glob patterns.
-_GRANT: dict[str, list[str]] = {"*": ["*"]}
-_guard: PathGuard = PathGuard(_GRANT)
-_runner: HostRunner | PodmanRunner = HostRunner()
+_DEFAULT_GRANT = {"*": ["*"]}
+_CONTEXT = SessionContext(
+    grant=_DEFAULT_GRANT,
+    guard=PathGuard(_DEFAULT_GRANT),
+    runner=HostRunner()
+)
 
 
 def command_index() -> str:
     """Public helper: the granted command index. Fallback if toolex's schema
     generator reads the inner function's docstring instead of the wrapper's."""
-    return _REGISTRY.index(_GRANT)
+    return _REGISTRY.index(_CONTEXT.grant)
 
 
 def _scope_phrase(verb: str, scope: tuple[bool, list[str]] | None) -> str | None:
@@ -1201,24 +1212,27 @@ def _scope_phrase(verb: str, scope: tuple[bool, list[str]] | None) -> str | None
 
 def configure(grant, engine: str = "host"):
     """Called once by toolex after module load, BEFORE tool schemas are built."""
-    global _GRANT, _guard, _runner, shell
+    global _CONTEXT, shell
     grant = _as_grant(grant)
     if "write_anywhere" in grant and engine == "podman":
         raise ValueError(
             "minishell: write_anywhere is not supported under --engine podman "
             "(the container must not mount the host root read-write); "
             "use --engine host, or scope the write grant to the workspace")
-    _GRANT = grant
-    _guard = PathGuard(_GRANT)
-    read_scope = PathGuard._dominant(_GRANT, "read", "read_anywhere")
-    delete_scope = PathGuard._dominant(_GRANT, "delete", "delete_anywhere")
+    
+    guard = PathGuard(grant)
+    read_scope = PathGuard._dominant(grant, "read", "read_anywhere")
+    delete_scope = PathGuard._dominant(grant, "delete", "delete_anywhere")
     anywhere_read = bool(read_scope and read_scope[0])
-    _runner = PodmanRunner(host_root=anywhere_read) if engine == "podman" else HostRunner()
+    runner = PodmanRunner(host_root=anywhere_read) if engine == "podman" else HostRunner()
+    
+    _CONTEXT = SessionContext(grant=grant, guard=guard, runner=runner)
+    
     denied = sorted(s.name for s in _REGISTRY._by_name.values()
-                    if not _allowed(s, _GRANT))
+                    if not _allowed(s, grant))
     mode = "; ".join(p for p in (_scope_phrase("read", read_scope),
                                  _scope_phrase("write",
-                                     PathGuard._dominant(_GRANT, "write", "write_anywhere")),
+                                     PathGuard._dominant(grant, "write", "write_anywhere")),
                                  _scope_phrase("delete", delete_scope))
                      if p) or "no permissions"
     notes = [f"Permission mode: {mode}."]
@@ -1229,7 +1243,7 @@ def configure(grant, engine: str = "host"):
                      "inside the container — prefix host paths with /host to read "
                      "them. This weakens the container boundary; --engine host is "
                      "the expected pairing for anywhere grants.")
-    if _guard.write_needs_target_validation():
+    if guard.write_needs_target_validation():
         notes.append("patch: write targets are authorized from the diff's ---/+++ "
                      "headers and must be workdir-relative; pipe the diff in on "
                      "stdin — file operands, -i, and absolute header paths are "
@@ -1248,7 +1262,7 @@ def configure(grant, engine: str = "host"):
     base_doc = (shell.__doc__ or "").split("\n\nPermission mode:")[0].rstrip()
     shell.__doc__ = (base_doc
                      + "\n\n" + " ".join(notes)
-                     + "\n\nAvailable commands:\n" + _REGISTRY.index(_GRANT))
+                     + "\n\nAvailable commands:\n" + _REGISTRY.index(grant))
 
 
 # ===========================================================================
@@ -1293,7 +1307,7 @@ def shell(
     session) states the active mode and patterns.
     """
     emit_invocation("🥥", command_line)
-    return MiniShell(_REGISTRY, _runner, _GRANT, _guard).execute(command_line)
+    return MiniShell(_REGISTRY, _CONTEXT).execute(command_line)
 
 
 __all__ = discover_tools(globals(), __name__)
