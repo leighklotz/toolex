@@ -726,7 +726,7 @@ def _printf(args: list[str] | None = None, stdin: str | None = None) -> CommandR
 @command("help", doc="Print the full command index for the current permission grant.", native=True)
 def _help(args: str = "", stdin: str | None = None) -> CommandResult:
     # limit=None: the schema-embedded index truncates at 4096 with the hint
-    # "run 'help' for the full list" — help must be able to keep that promise.
+    # "run 'help' for the full list" — help must be able to that promise.
     return CommandResult(_REGISTRY.index(_GRANT, limit=None) + "\n", "", 0)
 
 
@@ -963,33 +963,35 @@ def _positionals(rest: list[str], *, skip_digit_values: bool) -> list[str]:
     return out
 
 
+def _get_leading_paths(rest: list[str], spec: CommandSpec, kind: str) -> list[str]:
+    """find: start-point operands precede the first predicate token; '!'
+    is a predicate operator, never a path."""
+    out = []
+    for t in rest:
+        if t.startswith("-") or t == "!":
+            break
+        out.append(t)
+    return out
+
+
+_PATH_STRATEGIES = {
+    "none": lambda r, s, k: [],
+    "diff_headers": lambda r, s, k: [],
+    "all_positionals": lambda r, s, k: _positionals(r, skip_digit_values=(k == "read")),
+    "positionals_after_nonfile": lambda r, s, k: _positionals(r, skip_digit_values=(k == "read"))[s.nonfile_operands:],
+    "leading_positionals": _get_leading_paths,
+}
+
+
 def _stage_paths(rest: list[str], spec: CommandSpec, kind: str) -> list[str]:
     """Path operands of a stage per its CommandSpec classification (R10).
     kind is 'read', 'write', or 'delete'. Sole operand source for the
     stdin-refusal check and (Change 10) pre-dispatch PathGuard checks."""
     desc = getattr(spec, f"{kind}_paths")
-    if desc in ("none", "diff_headers"):
-        # 'diff_headers' is resolved from the stage's stdin by the write-side
-        # enforcement (Changes 10–11); it names no static argv operand and is
-        # never treated as a bypass.
-        return []
-    # Write side: a dropped operand is a bypass ('tee -a 5' must be checked),
-    # so digit exclusion is read-only.
-    positionals = _positionals(rest, skip_digit_values=(kind == "read"))
-    if desc == "all_positionals":
-        return positionals
-    if desc == "positionals_after_nonfile":
-        return positionals[spec.nonfile_operands:]
-    if desc == "leading_positionals":
-        # find: start-point operands precede the first predicate token; '!'
-        # is a predicate operator, never a path.
-        out = []
-        for t in rest:
-            if t.startswith("-") or t == "!":
-                break
-            out.append(t)
-        return out
-    raise ValueError(f"unknown path descriptor: {desc}")   # unreachable: validated at decoration
+    strategy = _PATH_STRATEGIES.get(desc)
+    if strategy is None:
+        raise ValueError(f"unknown path descriptor: {desc}")
+    return strategy(rest, spec, kind)
 
 
 def _call(func, args, stdin) -> CommandResult:
@@ -1295,4 +1297,3 @@ def shell(
 
 
 __all__ = discover_tools(globals(), __name__)
-
