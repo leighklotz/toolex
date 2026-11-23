@@ -545,6 +545,57 @@ def _patch_target_paths(diff_text: str) -> list[str]:
 # PathGuard — grant-scoped path validation (used by configure() and the
 # interpreter; a denied path never reaches subprocess)
 # ===========================================================================
+_GLOB_CHARS = set("*?[")
+
+def _split_literal(pattern):
+    """Split a pattern into (literal_anchor_segments, glob_tail_segments)."""
+    segs = [s for s in pattern.split("/") if s not in ("", ".")]
+    anchor, tail = [], []
+    in_tail = False
+    for seg in segs:
+        if not in_tail and not any(c in _GLOB_CHARS for c in seg):
+            anchor.append(seg)
+        else:
+            in_tail = True
+            tail.append(seg)
+    return anchor, tail
+
+def _normalize_pattern(pat, workdir, anywhere):
+    """Symlink-honest normalization for one grant pattern.
+
+    - The literal prefix of a pattern is resolved on disk (workspace-
+      anchored for scoped patterns, root-anchored for anywhere patterns).
+    - A fully-literal pattern naming an existing directory is expanded to
+      also match everything beneath it (<dir> and <dir>/**).
+    """
+    pat = str(pat).strip()
+    if not pat:
+        return pat
+    anchor, tail = _split_literal(pat)
+    if anchor:
+        base = Path("/") if pat.startswith("/") else workdir
+        cand = base.joinpath(*anchor)
+        try:
+            res = cand.resolve()
+        except (OSError, ValueError):
+            res = cand
+        if anywhere:
+            base_str = res.as_posix()
+        else:
+            try:
+                base_str = res.relative_to(workdir).as_posix()
+            except ValueError:
+                return pat  # symlink escapes the workdir — leave as-is (denies)
+        pat = base_str + ("/" + "/".join(tail) if tail else "")
+    if not any(c in _GLOB_CHARS for c in pat):
+        target = (workdir / pat) if not anywhere else Path(pat)
+        try:
+            if target.is_dir():
+                return pat, pat + "/**"
+        except OSError:
+            pass
+    return pat
+
 
 class PathGuard:
     """Validates path operands against the session's path grants *before* a
@@ -583,9 +634,21 @@ class PathGuard:
         # Same root the interpreter globs against (_WORKSPACE); resolved so
         # both sides of the containment comparison are symlink-honest.
         self._workdir = Path(SANDBOX_CONFIG["host_data_dir"]).resolve()
-        self._read = self._dominant(grant, "read", "read_anywhere")
-        self._write = self._dominant(grant, "write", "write_anywhere")
-        self._delete = self._dominant(grant, "delete", "delete_anywhere")
+        self._read = self._norm(self._dominant(grant, "read", "read_anywhere"))
+        self._write = self._norm(self._dominant(grant, "write", "write_anywhere"))
+        self._delete = self._norm(self._dominant(grant, "delete", "delete_anywhere"))
+
+    def _norm(self, scope):
+         if scope is None:
+             return None
+         anywhere, patterns = scope
+         out = []
+         for pat in patterns:
+             r = _normalize_pattern(pat, self._workdir, anywhere)
+             for x in (r if isinstance(r, tuple) else (r,)):
+                 if x and x not in out:
+                     out.append(x)
+         return (anywhere, tuple(out))
 
     @staticmethod
     def _dominant(grant: dict, scoped: str,
@@ -1221,8 +1284,9 @@ def configure(grant, engine: str = "host"):
             "use --engine host, or scope the write grant to the workspace")
     
     guard = PathGuard(grant)
-    read_scope = PathGuard._dominant(grant, "read", "read_anywhere")
-    delete_scope = PathGuard._dominant(grant, "delete", "delete_anywhere")
+    read_scope = guard._read
+    delete_scope = guard._delete
+    write_scope = guard._write
     anywhere_read = bool(read_scope and read_scope[0])
     runner = PodmanRunner(host_root=anywhere_read) if engine == "podman" else HostRunner()
     
@@ -1231,8 +1295,7 @@ def configure(grant, engine: str = "host"):
     denied = sorted(s.name for s in _REGISTRY._by_name.values()
                     if not _allowed(s, grant))
     mode = "; ".join(p for p in (_scope_phrase("read", read_scope),
-                                 _scope_phrase("write",
-                                     PathGuard._dominant(grant, "write", "write_anywhere")),
+                                 _scope_phrase("write", write_scope),
                                  _scope_phrase("delete", delete_scope))
                      if p) or "no permissions"
     notes = [f"Permission mode: {mode}."]
