@@ -10,6 +10,8 @@ from typing import Dict, List, Optional, Any, Callable
 from functools import wraps
 from dataclasses import dataclass
 
+ROBOT_EMOJI = "🤖"
+
 # --- SANDBOX CONFIGURATION ---
 SANDBOX_EMOJI = "\U0001F3D6" # 🏖️
 
@@ -185,7 +187,6 @@ def emit_invocation(tool_icon: str, *args, **kwargs) -> None:
     """Print one text fragment to stderr:  🤖<icon> [bare_val] key="val"
     Positional args are printed as bare values; kwargs are printed as key="val".
     """
-    robot = "🤖"
     parts = []
 
     # 1. Handle bare values (positional args)
@@ -206,7 +207,7 @@ def emit_invocation(tool_icon: str, *args, **kwargs) -> None:
         else:
             parts.append(f"{k}={v!r}")
 
-    line = f"{robot}{tool_icon} {' '.join(parts)}"
+    line = f"{ROBOT_EMOJI}{tool_icon} {' '.join(parts)}"
     print(line, file=sys.stderr, flush=True, end='')
 
 

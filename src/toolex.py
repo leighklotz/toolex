@@ -433,7 +433,7 @@ def main(args):
 
     executed_states = set()
 
-    for _ in range(args.total_iterations):
+    for round_n in range(args.total_iterations):
         if messages and messages[-1].get("role") == "assistant" and not messages[-1].get("tool_calls"):
             print(MAGIC_HEADER); print(json.dumps(messages, default=str)); break
 
@@ -442,12 +442,12 @@ def main(args):
             if TOOLS:
                 payload["tools"] = TOOLS
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug("--- LLM REQUEST ---\n%s", json.dumps(payload, indent=2))
+                logger.debug("--- LLM REQUEST {round_n} ---\n%s", json.dumps(payload, indent=2))
             key = os.getenv("OPENAI_API_KEY", None)
             headers={"Authorization": f"Bearer {key}"} if key else None
             response = requests.post(URL, json=payload, headers=headers, timeout=TOOLS_INFERENCE_TIMEOUT).json()
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug("--- LLM RESPONSE ---\n%s", json.dumps(response, indent=2))
+                logger.debug("--- LLM RESPONSE {round_n} ---\n%s", json.dumps(response, indent=2))
             if "choices" not in response or not response["choices"]: break
         except Exception as e:
             logger.error(f"API Error: {e}"); break

@@ -212,52 +212,54 @@ def test_write_denied_under_read_grant(line, msg):
     assert fake.calls == []
 
 
-@pytest.mark.parametrize("line,frag", [
-    ("find . -delete", "destructive find predicates"),
-    ("find x -exec rm {}", "destructive find predicates"),
-    ("find x -execdir rm {}", "destructive find predicates"),
-    ("find . -ok rm {}", "destructive find predicates"),
-    ("find . -fprint0 out.txt", "destructive find predicates"),
-    ("sed -i s/a/b/ f.txt", "-i is disabled"),
-    ("sed -i.bak s/a/b/ f.txt", "-i is disabled"),
-    ("sed -ni 's/a/b/p' input.txt", "-i is disabled"),
-    ("sed --in-place s/a/b/ f.txt", "-i is disabled"),
-    ("sort -o out.txt", "sort -o is disabled"),
-    ("sort -ofile.txt", "sort -o is disabled"),
-    ("sort -ro output.txt input.txt", "sort -o is disabled"),
-    ("sort --output out.txt", "sort -o is disabled"),
-    ("sort --compress-program=cat", "sort --compress-program is disabled"),
-    ("sort --compress-program cat", "sort --compress-program is disabled"),
-    ("date -s 2024-01-01", "date -s/-f are disabled"),
-    ("date --set=2024-01-01", "date -s/-f are disabled"),
-    ("uniq input.txt output.txt", "uniq output operands are disabled"),
-    ("uniq - output.txt", "uniq output operands are disabled"),
+@pytest.mark.parametrize("line,option", [
+    ("find . -delete", "-delete"),
+    ("find x -exec rm {}", "-exec"),
+    ("find x -execdir rm {}", "-execdir"),
+    ("find . -ok rm {}", "-ok"),
+    ("find . -fprint0 out.txt", "-fprint0"),
+    ("sed -i s/a/b/ f.txt", "-i"),
+    ("sed -i.bak s/a/b/ f.txt", "-i"),
+    ("sed -ni 's/a/b/p' input.txt", "-i"),
+    ("sed --in-place s/a/b/ f.txt", "--in-place"),
+    ("sort -o out.txt", "-o"),
+    ("sort -ofile.txt", "-o"),
+    ("sort -ro output.txt input.txt", "-o"),
+    ("sort --output out.txt", "--output"),
+    ("sort --compress-program=cat", "--compress-program"),
+    ("sort --compress-program cat", "--compress-program"),
+    ("date -s 2024-01-01", "-s"),
+    ("date --set=2024-01-01", "--set"),
+    # operand denials — no option root; only the code is asserted:
+    ("uniq input.txt output.txt", None),
+    ("uniq - output.txt", None),
     # Change 9 hardening (grant-free validators — banned under any grant):
-    ("date -f /etc/dates", "date -s/-f are disabled"),
-    ("date --file=/etc/dates", "date -s/-f are disabled"),
-    ("sed -f script.sed in.txt", "sed -f is disabled"),
-    ("sed --file=script.sed in.txt", "sed --file is disabled"),
-    ("sort -T /tmp", "sort -T is disabled"),
-    ("sort --random-source=/dev/urandom", "sort --random-source is disabled"),
-    ("sort --files0-from=list.txt", "sort --files0-from is disabled"),
-    ("sort --temporary-directory=/tmp", "sort --temporary-directory is disabled"),
-    ("grep -f pats.txt file.txt", "grep -f is disabled"),
-    ("grep --exclude-from=x foo f.txt", "grep --exclude-from is disabled"),
-    ("grep --include-from=x foo f.txt", "grep --include-from is disabled"),
-    ("diff -X excl a b", "options are disabled"),
-    ("diff --from-file=old new", "options are disabled"),
-    ("file -f list.txt", "file -f is disabled"),
-    ("file --files-from=list.txt", "file -f is disabled"),
-    ("patch -p2 x.diff", "option -p is disabled"),
-    ("patch -b x.diff", "option -b is disabled"),
-    ("patch --output=out x.diff", "option --output is disabled"),
+    ("date -f /etc/dates", "-f"),
+    ("date --file=/etc/dates", "--file"),
+    ("sed -f script.sed in.txt", "-f"),
+    ("sed --file=script.sed in.txt", "--file"),
+    ("sort -T /tmp", "-T"),
+    ("sort --random-source=/dev/urandom", "--random-source"),
+    ("sort --files0-from=list.txt", "--files0-from"),
+    ("sort --temporary-directory=/tmp", "--temporary-directory"),
+    ("grep -f pats.txt file.txt", "-f"),
+    ("grep --exclude-from=x foo f.txt", "--exclude-from"),
+    ("grep --include-from=x foo f.txt", "--include-from"),
+    ("diff -X excl a b", "-X"),
+    ("diff --from-file=old new", "--from-file"),
+    ("file -f list.txt", "-f"),
+    ("file --files-from=list.txt", "--files-from"),
+    ("patch -p2 x.diff", "-p"),
+    ("patch -b x.diff", "-b"),
+    ("patch --output=out x.diff", "--output"),
     # rm options are all banned — single-file move-to-trash only, no -r/-rf ever:
-    ("rm -r dir", "rm options are disabled"),
-    ("rm -rf dir", "rm options are disabled"),
-    ("rm -f file.txt", "rm options are disabled"),
-    ("rm -i file.txt", "rm options are disabled"),
-    ("rm --recursive dir", "rm options are disabled"),
-    ("rm -- file.txt", "rm options are disabled"),
+    # ('rm -- file.txt' is not a validator denial: '--' ends option parsing
+    # before the deny-all-options check, so it stays the native one-operand refusal.)
+    ("rm -r dir", "-r"),
+    ("rm -rf dir", "-rf"),
+    ("rm -f file.txt", "-f"),
+    ("rm -i file.txt", "-i"),
+    ("rm --recursive dir", "--recursive"),
 ])
 def test_validators_block_destructive_flags(line, option):
     res, fake = run_line(line)
@@ -762,14 +764,12 @@ def test_rm_rejected_under_read_only_grant(ws):
     assert "permission denied: rm requires delete" in res.stderr
     assert fake.calls == []
     assert (ws / "precious.txt").exists()
-
 def test_rm_succeeds_under_delete_grant(ws):
     (ws / "stale.txt").write_text("x\n")
     res, fake = run_line("rm stale.txt", granted={"delete": ["*"]})
     assert res.exit_code == 0
     assert fake.calls == []
     assert not (ws / "stale.txt").exists()
-
 def test_rm_denied_for_out_of_workdir_operand_even_under_delete_grant(ws, tmp_path):
     outside = tmp_path / "outside.txt"
     outside.write_text("do not touch\n")
@@ -778,7 +778,6 @@ def test_rm_denied_for_out_of_workdir_operand_even_under_delete_grant(ws, tmp_pa
     assert "outside the working directory" in res.stderr
     assert fake.calls == []
     assert outside.exists()
-
 def test_rm_operand_is_pattern_checked_under_scoped_delete(ws):
     (ws / "keep.py").write_text("x\n")
     (ws / "notes.txt").write_text("y\n")
@@ -789,7 +788,6 @@ def test_rm_operand_is_pattern_checked_under_scoped_delete(ws):
     res, _ = run_line("rm keep.py", granted={"delete": ["*.py"]})
     assert res.exit_code == 0
     assert not (ws / "keep.py").exists()
-
 def test_rm_trash_dir_created_by_configure(ws, fresh):
     fresh.configure({"read": ["*"], "write": ["*"], "delete": ["*"]}, engine="host")
     assert (ws / ".trash").is_dir()
