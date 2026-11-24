@@ -266,7 +266,7 @@ def _serialize_result(result):
 
 def find_module_for_func(mod_registry, func_name):
     if func_name in mod_registry: return mod_registry[func_name]
-    raise ValueError(f"Tool function {func_name} not found.")
+    raise ValueError(f"Tool function {func_name} not found. This is a serious inference error.")
 
 
 def _shell_preamble_part(caps: Dict[str, List[str]]) -> str:

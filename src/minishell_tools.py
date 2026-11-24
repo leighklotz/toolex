@@ -278,7 +278,7 @@ class CommandRegistry:
 
         lines = []
 
-        lines.append("Only the following commands are available:\n")
+        lines.append("Available commands:\n")
         for s in allowed:
             tags = ""
             if "write" in s.caps:
@@ -1331,6 +1331,7 @@ def configure(grant, engine: str = "host"):
     shell.__doc__ = (base_doc
                      + "\n\n" + " ".join(notes)
                      + _REGISTRY.index(grant))
+    print(f"{shell.__doc__=}", file=sys.stderr)
 
 
 # ===========================================================================
@@ -1351,7 +1352,7 @@ def shell(
     """Execute one command line in minishell.
 
     Pipes only; the pipeline stops at the first failing stage. Available
-    commands are listed below (also available at runtime via 'help').
+    commands are available at runtime via `help`.
 
     Semantics: '|' is the only separator — ';', '&&', '||', file-redirects, and
     subshells are rejected (exit 2) with instructions to split the work into
