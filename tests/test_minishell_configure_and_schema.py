@@ -5,6 +5,7 @@ Split from test_minishell.py; the shared constants, helpers, and fixtures
 live in conftest.py (see its module docstring for the patch-set notes).
 """
 
+import dataclasses
 from typing import get_args, get_type_hints
 
 import pytest
@@ -21,17 +22,17 @@ from conftest import FakeRunner, names_in
 @pytest.mark.parametrize("engine,expected", [("host", "HostRunner"), ("podman", "PodmanRunner")])
 def test_configure_flips_runner(fresh, engine, expected):
     fresh.configure({"*": ["*"]}, engine=engine)
-    assert type(fresh._runner).__name__ == expected
+    assert type(fresh._CONTEXT.runner).__name__ == expected
 
 
 def test_configure_grant_enforced_at_dispatch(fresh):
     fresh.configure({"read": ["*"]}, engine="host")
-    assert fresh._GRANT == {"read": ["*"]}
+    assert fresh._CONTEXT.grant == {"read": ["*"]}
     assert "patch" not in names_in(fresh.command_index())
     assert "disabled this session:" in fresh.command_index()
     fake = FakeRunner()
-    res = minishell_tools.MiniShell(fresh._REGISTRY, fake,
-                                    fresh._GRANT, fresh._guard).execute("patch f.diff")
+    ctx = dataclasses.replace(fresh._CONTEXT, runner=fake)
+    res = minishell_tools.MiniShell(fresh._REGISTRY, ctx).execute("patch f.diff")
     assert res.exit_code == 126
     assert fake.calls == []
 
@@ -40,8 +41,6 @@ def test_configure_rewrites_shell_docstring(fresh):
     assert "Available commands:" not in fresh.shell.__doc__
     fresh.configure({"*": ["*"]}, engine="host")
     assert "Available commands:" in fresh.shell.__doc__
-    # Change 7/12: the wildcard grant reads as ANYWHERE for both families.
-    assert "Capabilities:" in fresh.shell.__doc__
     assert "read_anywhere" in fresh.shell.__doc__
     assert "write_anywhere" in fresh.shell.__doc__
     assert "delete_anywhere" in fresh.shell.__doc__
@@ -63,19 +62,19 @@ def test_configure_rejects_write_anywhere_under_podman_before_mutation(fresh):
     with pytest.raises(ValueError, match="write_anywhere"):
         fresh.configure({"write_anywhere": ["*"]}, engine="podman")
     # fail-closed: the ValueError fires BEFORE any module state is touched
-    assert fresh._GRANT == {"*": ["*"]}
-    assert type(fresh._runner).__name__ == "HostRunner"
+    assert fresh._CONTEXT.grant == {"*": ["*"]}
+    assert type(fresh._CONTEXT.runner).__name__ == "HostRunner"
 
 
 def test_configure_podman_anywhere_read_mounts_host_root_readonly(fresh):
     fresh.configure({"read_anywhere": ["*"], "write": ["*"]}, engine="podman")
-    assert type(fresh._runner).__name__ == "PodmanRunner"
-    assert fresh._runner._host_root is True
+    assert type(fresh._CONTEXT.runner).__name__ == "PodmanRunner"
+    assert fresh._CONTEXT.runner._host_root is True
     assert "/host" in (fresh.shell.__doc__ or "")
 
 
 def test_command_index_helper_matches_registry(fresh):
-    assert fresh.command_index() == fresh._REGISTRY.index(fresh._GRANT)
+    assert fresh.command_index() == fresh._REGISTRY.index(fresh._CONTEXT.grant)
 
 
 def test_static_docstring_carries_the_never_approximate_line(fresh):

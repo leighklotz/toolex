@@ -28,8 +28,8 @@ Patch set notes (this revision):
   frozenset-of-names transport is fail-closed: _as_grant normalizes it to an
   empty grant, so every test passes dicts and one test pins the legacy
   frozenset denial explicitly.
-* MiniShell takes (registry, runner, grant, guard). The PathGuard is built
-  from the same grant dict and is what actually checks path operands before
+* MiniShell takes (registry, context) with the SessionContext bundle (grant, guard, runner).
+  The PathGuard is built from the same grant dict and is what actually checks path operands before
   dispatch (exit 126); _allowed remains the name-level gate.
 * FakeRunner matches the runner contract's full signature — the interpreter
   hands runners a fourth `redirects` argument (the `> /dev/null` family) —
@@ -79,7 +79,7 @@ import minishell_tools
 WILD = {"*": ["*"]}
 
 EXPECTED_COMMANDS = {
-    "ls", "pwd", "whoami", "which", "basename", "dirname", "stat", "file", "du", "df",
+    "ls", "pwd", "whoami", "basename", "dirname", "stat", "file", "du", "df",
     "cat", "head", "tail", "wc", "uniq", "diff",
     "grep", "sed", "cut", "tr", "sort",
     "date", "find",
@@ -124,7 +124,8 @@ def run_line(line, granted=WILD, results=None):
     fake = FakeRunner(results)
     grant = minishell_tools._as_grant(granted)
     guard = minishell_tools.PathGuard(grant)
-    sh = minishell_tools.MiniShell(minishell_tools._REGISTRY, fake, grant, guard)
+    ctx = minishell_tools.SessionContext(grant=grant, guard=guard, runner=fake)
+    sh = minishell_tools.MiniShell(minishell_tools._REGISTRY, ctx)
     return sh.execute(line), fake
 
 

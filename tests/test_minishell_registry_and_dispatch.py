@@ -136,7 +136,7 @@ def test_operand_classification_per_command():
     assert reg.get("rm").write_paths == "none"
     assert reg.get("rm").read_paths == "none"
     assert reg.get("rm").native is True
-    for name in ("pwd", "whoami", "which", "basename", "dirname", "date",
+    for name in ("pwd", "whoami", "basename", "dirname", "date",
                  "echo", "printf", "help", "cut", "tr"):
         spec = reg.get(name)
         assert spec.read_paths == "none" and spec.write_paths == "none", name

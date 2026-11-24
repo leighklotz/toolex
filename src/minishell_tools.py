@@ -3,7 +3,7 @@
 
 One module contains everything: the CommandResult type, the @command
 annotation, the command registry, both runners (host / podman), the
-PathGuard, the pipe-only interpreter, all 29 shell commands, and the
+PathGuard, the pipe-only interpreter, shell commands, and the
 single LLM-facing `shell` tool. The registry is built from this module's
 own namespace at import time, so adding a command is writing one
 decorated function — there is no wiring step and no second module.
@@ -37,7 +37,7 @@ Anywhere dominates scoped (read_anywhere over read, write_anywhere over
 write, delete_anywhere over delete; the dominant scope's patterns
 apply). The `shell` tool is visible under any minishell grant, but
 per-stage dispatch still denies commands whose capabilities are not
-covered (exit 126).
+29covered (exit 126).
 
 Enforcement is in-interpreter and pre-dispatch: PathGuard resolves every
 stage's path operands (symlink-safe — a workspace symlink pointing
@@ -272,20 +272,13 @@ class CommandRegistry:
     def get(self, name):
         return self._by_name.get(name)
 
-    def index(self, grant: dict[str, list[str]], limit: int | None = 4096) -> str:
-        # Grant header makes the index self-describing; R7 wants the effective
-        # scopes AND patterns visible: grant: read=*.py write=*.log
-        grant = _as_grant(grant)
-        if "*" in grant:
-            grant_str = "*"
-        elif grant:
-            grant_str = " ".join(f"{cap}={','.join(sorted(pats))}"
-                                 for cap, pats in sorted(grant.items()))
-        else:
-            grant_str = "(nothing granted)"
+    def index(self, grant: dict[str, list[str]], limit: int | None = None) -> str:
         allowed = [s for s in sorted(self._by_name.values(), key=lambda s: s.name)
                    if _allowed(s, grant)]
-        lines = [f"grant: {grant_str}"]
+
+        lines = []
+
+        lines.append("Only the following commands are available:\n")
         for s in allowed:
             tags = ""
             if "write" in s.caps:
@@ -295,9 +288,23 @@ class CommandRegistry:
             if s.consumes_stdin:
                 tags += "  [stdin]"
             lines.append(f"{s.name} — {s.doc}{tags}")
+
         disabled = sorted(set(self._by_name) - {s.name for s in allowed})
         if disabled:
-            lines.append(f"disabled this session: {', '.join(disabled)}")
+            lines.append(f"\nCommands disabled this session: {', '.join(disabled)}")
+
+        # Grant footer makes the index self-describing; R7 wants the effective
+        # scopes AND patterns visible: grant: read=*.py write=*.log
+        grant = _as_grant(grant)
+        if "*" in grant:
+            grant_str = "*"
+        elif grant:
+            grant_str = " ".join(f"{cap}={','.join(sorted(pats))}"
+                                 for cap, pats in sorted(grant.items()))
+        else:
+            grant_str = "(nothing granted)"
+        lines.append(f"\ncapability grant: {grant_str}")
+
         text = "\n".join(lines)
         if limit is None or len(text) <= limit:
             return text
@@ -796,9 +803,7 @@ def _printf(args: list[str] | None = None, stdin: str | None = None) -> CommandR
 
 @command("help", doc="Print the full command index for the current permission grant.", native=True)
 def _help(args: str = "", stdin: str | None = None) -> CommandResult:
-    # limit=None: the schema-embedded index truncates at 4096 with the hint
-    # "run 'help' for the full list" — help must be able to that promise.
-    return CommandResult(_REGISTRY.index(_CONTEXT.grant, limit=None) + "\n", "", 0)
+    return CommandResult(_REGISTRY.index(_CONTEXT.grant) + "\n", "", 0)
 
 
 @command("rm", doc="Move ONE file to .trash/ (no permanent delete, no directories, no recursion)",
@@ -1142,7 +1147,8 @@ class MiniShell:
             name, rest = toks[0], toks[1:]
             spec = self._reg.get(name)
             if spec is None:
-                return CommandResult("", f"command not found: {name} (run 'help')", 127)
+                lines = [f"command not found: {name}; run help to list all commands:", "$ help"]
+                return CommandResult("", "\n".join(lines), 127)
             if not _allowed(spec, self._grant):
                 return CommandResult("", f"permission denied: {name} requires "
                                          f"{' '.join(sorted(spec.caps))}", 126)
@@ -1187,7 +1193,6 @@ _BINARY_DEFS = [
     {"name": "ls", "doc": "List directory contents.", "read_paths": "all_positionals"},
     {"name": "pwd", "doc": "Print the current working directory."},
     {"name": "whoami", "doc": "Print the effective user name."},
-    {"name": "which", "doc": "Locate a command in PATH."},
     {"name": "basename", "doc": "Strip directory and optional suffix from a filename."},
     {"name": "dirname", "doc": "Strip the last component from a filename."},
     {"name": "stat", "doc": "Display file or filesystem status.", "read_paths": "all_positionals"},
@@ -1325,7 +1330,7 @@ def configure(grant, engine: str = "host"):
     base_doc = (shell.__doc__ or "").split("\n\nPermission mode:")[0].rstrip()
     shell.__doc__ = (base_doc
                      + "\n\n" + " ".join(notes)
-                     + "\n\nAvailable commands:\n" + _REGISTRY.index(grant))
+                     + _REGISTRY.index(grant))
 
 
 # ===========================================================================
@@ -1370,6 +1375,8 @@ def shell(
     session) states the active mode and patterns.
     """
     emit_invocation("🥥", command_line)
+    if not command_line.strip():
+        return _help()
     return MiniShell(_REGISTRY, _CONTEXT).execute(command_line)
 
 
