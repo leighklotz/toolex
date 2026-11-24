@@ -98,7 +98,7 @@ def read_file_in_workdir(
     file_path: Annotated[str, "The path to the file you wish to read. Can be relative or absolute. file_path must be inside working dir."]
 ) -> str:
     """Returns the contents of a text file as a single string."""
-    emit_invocation("📥", file_path=file_path)
+    emit_invocation("📥", file_path)
     check_permitted_path(file_path)
     return _read_file_impl(file_path)
 
@@ -107,7 +107,7 @@ def read_file_anywhere(
     file_path: Annotated[str, "The path to the file you wish to read. Can be relative or absolute."]
 ) -> str:
     """Returns the contents of a text file as a single string."""
-    emit_invocation("📥", file_path=file_path)
+    emit_invocation("📥", file_path)
     check_permitted_path(file_path, contain=False)
     return _read_file_impl(file_path)
 
@@ -117,7 +117,7 @@ def write_file_anywhere(
     content: Annotated[str, "The full string content to write into the file."]
 ) -> str:
     """Writes text content to a file, overwriting existing content or creating new files."""
-    emit_invocation("💾", file_path=file_path)
+    emit_invocation("💾", file_path)
     check_permitted_path(file_path, contain=False)
     return _write_file_impl(file_path, content)
 
@@ -127,7 +127,7 @@ def write_file_in_workdir(
     content: Annotated[str, "The full string content to write into the file."]
 ) -> str:
     """Writes text content to a file, overwriting existing content or creating new files."""
-    emit_invocation("💾", file_path=file_path)
+    emit_invocation("💾", file_path)
     check_permitted_path(file_path)
     return _write_file_impl(file_path, content)
 
@@ -137,7 +137,7 @@ def edit_file_in_workdir(
     edit_instructions: Annotated[str, "A string containing replacement instructions using the format 'replace:old_text:new_text'. Example: 'replace:hello:hi'"]
 ) -> str:
     """Applies a specific text substitution to an existing file. Requires precise formatting."""
-    emit_invocation("✒", file_path=file_path)
+    emit_invocation("✒", file_path)
     check_permitted_path(file_path)
     try:
         if "replace:" not in edit_instructions:
@@ -159,7 +159,7 @@ def edit_file_anywhere(
     edit_instructions: Annotated[str, "A string containing replacement instructions using the format 'replace:old_text:new_text'. Example: 'replace:hello:hi'"]
 ) -> str:
     """Applies a specific text substitution to an existing file. Requires precise formatting."""
-    emit_invocation("✒", file_path=file_path)
+    emit_invocation("✒", file_path)
     check_permitted_path(file_path, contain=False)
     try:
         if not "replace:" in edit_instructions:
@@ -201,7 +201,7 @@ def read_files_in_workdir(
 ) -> str:
     """Reads all files matching a glob pattern and returns their contents, each
     preceded by a '===== <path> =====' header line."""
-    emit_invocation("📥", file_pattern=file_pattern)
+    emit_invocation("📥*", file_pattern=file_pattern)
     matched = sorted(glob.glob(file_pattern))
     if not matched:
         return f"Error: no files match pattern {file_pattern!r}"
