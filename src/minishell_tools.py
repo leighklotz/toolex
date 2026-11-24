@@ -91,7 +91,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Callable
 
-from tooling import SANDBOX_CONFIG, discover_tools, tool, emit_invocation
+from tooling import SANDBOX_CONFIG, discover_tools, tool, emit_invocation, ToolError, OptionDisabled, OperandDenied, PathDenied, ToolFailed
 
 # ===========================================================================
 # Results
@@ -113,6 +113,7 @@ class CommandResult:
     stdout: str = ""
     stderr: str = ""
     exit_code: int = 0
+    error: ToolError | None = None    # set on any structured denial
 
     @property
     def is_success(self) -> bool:
@@ -141,7 +142,7 @@ class CommandSpec:
     argv: tuple[str, ...] = ()           # defaults to (name,) — PATH lookup
     native: bool = False                 # True → call func(args=…, stdin=…)
     func: Callable | None = None
-    validate: Callable | None = None     # takes rest-tokens, raises ValueError to deny
+    validate: Callable | None = None     # takes rest-tokens, raises ValueError subclass to deny
 
 
 # Operand classification descriptors (R10). Validated at decoration time —

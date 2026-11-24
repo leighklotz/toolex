@@ -111,6 +111,12 @@ class FakeRunner:
         return minishell_tools.CommandResult("", "", 0)
 
 
+def run_error(line, **kw):
+    res, fake = run_line(line, **kw)
+    assert res.error is not None
+    return res, fake
+
+
 def run_line(line, granted=WILD, results=None):
     """Execute `line` through a real MiniShell over a FakeRunner.
 

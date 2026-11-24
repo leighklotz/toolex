@@ -8,8 +8,7 @@ import subprocess
 import shlex
 from typing import Dict, List, Optional, Any, Callable
 from functools import wraps
-
-
+from dataclasses import dataclass
 
 # --- SANDBOX CONFIGURATION ---
 SANDBOX_EMOJI = "\U0001F3D6" # 🏖️
@@ -209,4 +208,37 @@ def emit_invocation(tool_icon: str, *args, **kwargs) -> None:
 
     line = f"{robot}{tool_icon} {' '.join(parts)}"
     print(line, file=sys.stderr, flush=True, end='')
+
+
+# --- TOOL ERRORS ---
+@dataclass
+class ToolError(ValueError):           # ValueError keeps `pytest.raises(ValueError)` call sites valid
+    tool: str = ""
+    reason: str = ""
+    option: str | None = None          # the offending option root, e.g. "-i", "--compress-program"
+    exit_code: int | None = None
+    code: str = "error"                # machine class: "option_disabled", "path_denied", ...
+
+    def __post_init__(self):
+        super().__init__(self.reason)
+
+class OptionDisabled(ToolError):
+    def __post_init__(self):
+        if self.code == "error": self.code = "option_disabled"
+        if self.exit_code is None: self.exit_code = 1
+        super().__post_init__()
+
+class PathDenied(ToolError):
+    def __post_init__(self):
+        if self.code == "error": self.code = "path_denied"
+        if self.exit_code is None: self.exit_code = 126
+        super().__post_init__()
+
+class OperandDenied(ToolError):
+    def __post_init__(self):
+        if self.code == "error": self.code = "operand_denied"
+        if self.exit_code is None: self.exit_code = 1
+        super().__post_init__()
+
+class ToolFailed(ToolError): pass
 

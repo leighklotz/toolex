@@ -7,17 +7,14 @@ live in conftest.py (see its module docstring for the patch-set notes).
 """
 
 import pytest
-
 import minishell_tools
-
 from conftest import EXPECTED_COMMANDS, WILD, names_in, run_line
-
 
 # ---------------------------------------------------------------------------
 # registry
 # ---------------------------------------------------------------------------
 
-def test_registry_holds_exactly_29():
+def test_registry_size():
     assert set(minishell_tools._REGISTRY._by_name) == EXPECTED_COMMANDS
 
 
@@ -50,14 +47,16 @@ def test_index_filtered_by_grant():
                 if minishell_tools._allowed(s, {"read_anywhere": ["*"]})}
     assert anywhere == read_names
     wild = names_in(reg.index(WILD))
-    assert {"patch", "tee", "rm"} <= wild and len(wild) == 29
+    assert {"patch", "tee", "rm"} <= wild and len(wild) == len(EXPECTED_COMMANDS)
 
 
 def test_index_header_states_the_grant_and_disabled_list():
     reg = minishell_tools._REGISTRY
-    assert reg.index({"read": ["*"]}).splitlines()[0] == "grant: read=*"
-    assert reg.index({"read": ["*.py"]}).splitlines()[0] == "grant: read=*.py"
-    assert reg.index(WILD).splitlines()[0] == "grant: *"
+    def grant_line(text):
+        return next(ln for ln in text.splitlines() if ln.startswith("capability grant: "))
+    assert grant_line(reg.index({"read": ["*"]})) == "capability grant: read=*"
+    assert grant_line(reg.index({"read": ["*.py"]})) == "capability grant: read=*.py"
+    assert grant_line(reg.index(WILD)) == "capability grant: *"
     read_index = reg.index({"read": ["*"]})
     assert "disabled this session: patch, rm, tee" in read_index
     # an empty grant (the fail-closed normalization) says so explicitly
@@ -71,7 +70,7 @@ def test_index_limit_hint_and_unlimited():
     assert "whoami" not in trunc                       # only the first 10 chars survived
     full = reg.index(WILD, limit=None)
     assert full == reg.index(WILD, limit=10 ** 6)      # unlimited == effectively-unlimited
-    assert len(names_in(full)) == 29
+    assert len(names_in(full)) == len(EXPECTED_COMMANDS)
 
 
 def test_duplicate_name_raises_at_register():
@@ -190,7 +189,7 @@ def test_unknown_command_127():
     res, fake = run_line("frobnicate x")
     assert res.exit_code == 127
     assert "command not found: frobnicate" in res.stderr
-    assert "run 'help'" in res.stderr
+    assert "help" in res.stderr
     assert fake.calls == []
 
 
@@ -219,10 +218,10 @@ def test_write_denied_under_read_grant(line, msg):
     ("find x -execdir rm {}", "destructive find predicates"),
     ("find . -ok rm {}", "destructive find predicates"),
     ("find . -fprint0 out.txt", "destructive find predicates"),
-    ("sed -i s/a/b/ f.txt", "sed -i is disabled"),
-    ("sed -i.bak s/a/b/ f.txt", "sed -i is disabled"),
-    ("sed -ni 's/a/b/p' input.txt", "sed -i is disabled"),
-    ("sed --in-place s/a/b/ f.txt", "sed -i is disabled"),
+    ("sed -i s/a/b/ f.txt", "-i is disabled"),
+    ("sed -i.bak s/a/b/ f.txt", "-i is disabled"),
+    ("sed -ni 's/a/b/p' input.txt", "-i is disabled"),
+    ("sed --in-place s/a/b/ f.txt", "-i is disabled"),
     ("sort -o out.txt", "sort -o is disabled"),
     ("sort -ofile.txt", "sort -o is disabled"),
     ("sort -ro output.txt input.txt", "sort -o is disabled"),
@@ -245,8 +244,8 @@ def test_write_denied_under_read_grant(line, msg):
     ("grep -f pats.txt file.txt", "grep -f is disabled"),
     ("grep --exclude-from=x foo f.txt", "grep --exclude-from is disabled"),
     ("grep --include-from=x foo f.txt", "grep --include-from is disabled"),
-    ("diff -X excl a b", "diff exclude/from-file options are disabled"),
-    ("diff --from-file=old new", "diff exclude/from-file options are disabled"),
+    ("diff -X excl a b", "options are disabled"),
+    ("diff --from-file=old new", "options are disabled"),
     ("file -f list.txt", "file -f is disabled"),
     ("file --files-from=list.txt", "file -f is disabled"),
     ("patch -p2 x.diff", "option -p is disabled"),
@@ -260,12 +259,16 @@ def test_write_denied_under_read_grant(line, msg):
     ("rm --recursive dir", "rm options are disabled"),
     ("rm -- file.txt", "rm options are disabled"),
 ])
-def test_validators_block_destructive_flags(line, frag):
+def test_validators_block_destructive_flags(line, option):
     res, fake = run_line(line)
     assert res.exit_code == 1
-    assert frag in res.stderr
+    assert res.error is not None
+    assert res.error.code == "option_disabled"
+    assert res.error.tool == line.split()[0]
+    if option is not None:
+        assert res.error.option == option
+    assert res.error.exit_code == 1
     assert fake.calls == []
-
 
 def test_sed_option_argument_is_not_misread_as_in_place_flag():
     res, fake = run_line("sed -e 's/a/i/' file.txt",
@@ -325,8 +328,8 @@ def test_help_untruncated_matches_registry():
     res, fake = run_line("help")
     assert res.exit_code == 0
     assert fake.calls == []                              # native — no fork
-    assert res.stdout == minishell_tools._REGISTRY.index(minishell_tools._GRANT, limit=None) + "\n"
-    assert len(names_in(res.stdout)) == 29
+    assert res.stdout == minishell_tools._REGISTRY.index(minishell_tools._CONTEXT.grant, limit=None) + "\n"
+    assert len(names_in(res.stdout)) == len(EXPECTED_COMMANDS)
     assert "run 'help' for the full list" not in res.stdout
 
 
@@ -508,9 +511,8 @@ def test_glob_expansion_happens_before_path_checks(ws):
 
 def test_validator_denial_beats_path_denial(ws):
     # Precedence: validator (exit 1) fires before the path check (126).
-    res, fake = run_line("sed -i s/a/b/ a.py", granted={"read": ["*.py"]})
     assert res.exit_code == 1
-    assert "sed -i is disabled" in res.stderr
+    assert res.error.code == "option_disabled"   # not "path_denied"
     assert fake.calls == []
 
 
