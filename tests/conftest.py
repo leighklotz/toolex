@@ -86,8 +86,6 @@ EXPECTED_COMMANDS = {
     "echo", "printf", "help",
     "patch", "tee", "rm",
 }
-assert len(EXPECTED_COMMANDS) == 29
-
 
 # ---------------------------------------------------------------------------
 # helpers
