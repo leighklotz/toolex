@@ -10,11 +10,39 @@ from typing import Dict, List, Optional, Any, Callable
 from functools import wraps
 from dataclasses import dataclass
 
-ROBOT_EMOJI = "🤖"
+ASTERISK_EMOJI = "\u2733\uFE0F"  # ✳️  color
+ASTERISK_TEXT  = "\u2733\uFE0E"  # ✳︎  text presentation
+
+ICON_EMOJI = {
+    'ROBOT'      : "\U0001F916\ufe0f",  # 🤖️
+    'X'          : "\u274C\ufe0f",      # ❌️
+    'SANDBOX'    : "\U0001F3D6\ufe0f",  # 🏖️️
+    'COCOSHELL'  : "\U0001F965\ufe0f",  # 🥥
+    'INBOX'      : "\U0001F4E5\ufe0f",  # 📥
+    'MULTIINBOX' : "\U0001F4E5\ufe0f\u2733\ufe0f",  # 📥✳️ 
+    'SAVE'       : "\U0001F4BE\ufe0f",  # 💾
+    'WRITE'      : "\U0000270F\ufe0f",  # ✏️
+    'SEARCH'     : "\U0001F50D\ufe0f",  # 🔍
+    'SEARCHCASE' : "\U00001F521\ufe0f", # 🔍🔡
+    'SPARKLES'   : "\u2728\uFE0F",      # ✨
+}
+
+ICON_TEXT = {
+    'ROBOT'      : "\U0001F916\ufe0e",  # 🤖︎
+    'X'          : "\u274C\ufe0e",      # ❌︎
+    'SANDBOX'    : "\U0001F3D6\ufe0e",  # 🏖︎️
+    'COCOSHELL'  : "\U0001F965\ufe0e",  # 🥥︎
+    'INBOX'      : "\U0001F4E5\ufe0e",  # 📥︎
+    'MULTIINBOX' : "\U0001F4E5\ufe0e\u2733\ufe0e",  # 📥︎✳︎ 
+    'SAVE'       : "\U0001F4BE\ufe0e",  # 💾︎
+    'WRITE'      : "\u270F\ufe0e",      # ✒︎
+    'SEARCH'     : "\U0001F50D\ufe0e",  # 🔍︎
+    'SEARCHCASE' : "\U0001F50D\ufe0e\U00001F521\ufe0f", #🔍︎🔡︎︎
+    'SPARKLES' : "\u2728\uFE0E",        # ✨︎
+}
+
 
 # --- SANDBOX CONFIGURATION ---
-SANDBOX_EMOJI = "\U0001F3D6" # 🏖️
-
 # TODO: move elsewhere
 SANDBOX_CONFIG = {
     "image": "toolex-sandbox",          # The image you built with Podman
@@ -183,7 +211,7 @@ def discover_tools(namespace: Dict[str, Any], module_name: str) -> List[str]:
     ]
 
 # --- EVENG LOGGING ---
-def emit_invocation(tool_icon: str, *args, **kwargs) -> None:
+def emit_invocation(tool_icon_name: str, *args, **kwargs) -> None:
     """Print one text fragment to stderr:  🤖<icon> [bare_val] key="val"
     Positional args are printed as bare values; kwargs are printed as key="val".
     """
@@ -207,7 +235,8 @@ def emit_invocation(tool_icon: str, *args, **kwargs) -> None:
         else:
             parts.append(f"{k}={v!r}")
 
-    line = f"{ROBOT_EMOJI}{tool_icon} {' '.join(parts)}"
+    icons = ICON_EMOJI if os.getenv("HX_ICON_STYLE", "emoji") == "emoji" else ICON_TEXT
+    line = f"{icons['ROBOT']}{icons[tool_icon_name]} {' '.join(parts)}"
     print(line, file=sys.stderr, flush=True, end='')
 
 

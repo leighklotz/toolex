@@ -20,6 +20,8 @@ import fnmatch
 from typing import get_origin, get_args, Union, Any, Dict, List, Annotated, get_type_hints
 import argparse
 
+from tooling import emit_invocation
+
 # Logging configuration
 logging.basicConfig(
     level=logging.INFO,
@@ -553,11 +555,12 @@ def main(args):
         else:
             # Final Response
             messages.append(choice["message"])
-            print(MAGIC_HEADER); print(json.dumps(messages, default=str)); break
+            print(MAGIC_HEADER)
+            print(json.dumps(messages, default=str))
+            break
 
-    if sys.stderr.isatty():
-        sys.stderr.write("✨")
-        sys.stderr.flush()
+        emit_invocation('SPARKLES', f"{round_n}/{args.total_iterations}")
+
 
 __all__ = ["execute_tool", "main"]
 

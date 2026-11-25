@@ -1187,7 +1187,7 @@ class MiniShell:
                 self._check_stage_paths(spec, rest, buffer)
             except ToolError as e:
                 fail_msg = f"pipeline stage {i} ({name}) denied, exit 126\n{e}"
-                emit_invocation("❌️", fail_msg)
+                emit_invocation('X', fail_msg)
                 return CommandResult("", fail_msg, 126, error=e)
             if spec.native:
                 res = _call(spec.func, rest, buffer)
@@ -1401,7 +1401,7 @@ def shell(
     allowed patterns. The banner below (added when toolex configures the
     session) states the active mode and patterns.
     """
-    emit_invocation("🥥", command_line)
+    emit_invocation('COCOSHELL', command_line)
     if not command_line.strip():
         return _help()
     return MiniShell(_REGISTRY, _CONTEXT).execute(command_line)
