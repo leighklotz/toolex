@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 
 SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE}")")"
-ANSWER_DIR=~/wip/answer/
-TOOLEX_PY=~/wip/toolex/toolex.py
+: "${HX_HOME:=$HOME/wip/answer}"
+TOOLEX_PY=~/wip/toolex/src/toolex.py
 
-source "${ANSWER_DIR}/bin/commands/hx-bootstrap.sh" && hx core
+source "${HX_HOME}/bin/commands/hx-bootstrap.sh" && hx core
 
-export MODEL=$(hx model)
+export HX_MODEL=$(hx model)
+# echo "HX_MODEL=$HX_MODEL" >&2
 
 if [ -f "${SCRIPT_DIR}/.venv/bin/activate" ]; then
     # Pip-style: Use the local virtual environment if it exists
