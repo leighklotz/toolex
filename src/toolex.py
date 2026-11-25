@@ -436,8 +436,12 @@ def main(args):
     executed_states = set()
 
     for round_n in range(args.total_iterations):
+        #print(f"{round_n}/{args.total_iterations} ", file=sys.stderr)
         if messages and messages[-1].get("role") == "assistant" and not messages[-1].get("tool_calls"):
-            print(MAGIC_HEADER); print(json.dumps(messages, default=str)); break
+            print(MAGIC_HEADER)
+            print(json.dumps(messages, default=str))
+            emit_invocation('SPARKLES', f"{round_n}/{args.total_iterations}")
+            break
 
         try:
             payload = {"model": HX_MODEL, "messages": messages}
@@ -552,13 +556,23 @@ def main(args):
                     "tool_call_id": call["id"],
                     "content": json.dumps(result, default=str)
                 })
-        else:
+                emit_invocation('SPARKLES', f"{round_n}/{args.total_iterations}")
+        elif choice.get("finish_reason", '').lower() == 'stop':
             # Final Response
             messages.append(choice["message"])
             print(MAGIC_HEADER)
             print(json.dumps(messages, default=str))
+            emit_invocation('SPARKLES', f"{round_n}/{args.total_iterations}")
             break
+        else:
+            raise ValueError(f"finish_reason={choice.get("finish_reason", '')}")
 
+
+    else:
+        # Fell through looop; force a final response
+        messages.append(choice["message"])
+        print(MAGIC_HEADER)
+        print(json.dumps(messages, default=str))
         emit_invocation('SPARKLES', f"{round_n}/{args.total_iterations}")
 
 
