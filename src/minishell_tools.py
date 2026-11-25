@@ -1359,8 +1359,6 @@ def configure(grant, engine: str = "host"):
     shell.__doc__ = (base_doc
                      + "\n\n" + " ".join(notes)
                      + _REGISTRY.index(grant))
-    print(f"{shell.__doc__=}", file=sys.stderr)
-
 
 # ===========================================================================
 # The LLM surface (the only _is_toolex_tool in the file)
