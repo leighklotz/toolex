@@ -24,7 +24,8 @@ ICON_EMOJI = {
     'WRITE'      : "\U0000270F\ufe0f",  # ✏️
     'SEARCH'     : "\U0001F50D\ufe0f",  # 🔍
     'SEARCHCASE' : "\U00001F521\ufe0f", # 🔍🔡
-    'SPARKLES'   : "\u2728\uFE0F",      # ✨
+    'SPARKLES'   : "\u2728\ufe0f",      # ✨
+    'ROCKET'     : "\u0001F680\ufe0f",  # 🚀
 }
 
 ICON_TEXT = {
@@ -38,7 +39,8 @@ ICON_TEXT = {
     'WRITE'      : "\u270F\ufe0e",      # ✒︎
     'SEARCH'     : "\U0001F50D\ufe0e",  # 🔍︎
     'SEARCHCASE' : "\U0001F50D\ufe0e\U00001F521\ufe0f", #🔍︎🔡︎︎
-    'SPARKLES' : "\u2728\uFE0E",        # ✨︎
+    'SPARKLES'   : "\u2728\ufe0e",      # ✨︎
+    'ROCKET'     : "\U0001F680\ufe0e"   # 🚀︎
 }
 
 
@@ -134,7 +136,8 @@ def bash_wrap(name: str, cmd: List[str]):
 
             arg_payload = str(payload).strip() if payload is not None else ""
 
-            print(f"🚀{' '.join(cmd)} {arg_payload}", file=sys.stderr, end='', flush=True)
+            rocket = ICON_EMOJI['ROCKET']if os.getenv("HX_ICON_STYLE", "emoji") == "emoji" else ICON_TEXT['ROCKET']
+            print(f"{rocket}{' '.join(cmd)} {arg_payload}", file=sys.stderr, end='', flush=True)
             return run_bash_tool(name, cmd, arg_payload)
         return wrapper
     return decorator
