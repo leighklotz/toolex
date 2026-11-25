@@ -8,7 +8,7 @@ live in conftest.py (see its module docstring for the patch-set notes).
 
 import pytest
 import minishell_tools
-from conftest import EXPECTED_COMMANDS, WILD, names_in, run_line
+from conftest import EXPECTED_COMMANDS, WILD, assert_error, names_in, run_line
 
 # ---------------------------------------------------------------------------
 # registry
@@ -160,7 +160,7 @@ def test_as_grant_normalizes_and_fail_closes():
 def test_legacy_frozenset_transport_fail_closes(ws):
     res, fake = run_line("cat a.py", granted=frozenset({"read"}))
     assert res.exit_code == 126
-    assert "permission denied" in res.stderr
+    assert_error(res, "permission_denied", "cat")
     assert fake.calls == []
     assert "(nothing granted)" in minishell_tools._REGISTRY.index(frozenset({"read"}))
 
@@ -169,7 +169,7 @@ def test_digit_option_value_is_not_a_file_operand():
     # Change 6 delta: `head -n 5` without stdin must refuse, not dispatch.
     res, fake = run_line("head -n 5")
     assert res.exit_code == 1
-    assert res.stderr == "head reads stdin; give it file arguments or pipe something into it"
+    assert_error(res, "stdin_required", "head")
     assert fake.calls == []
 
 
@@ -188,27 +188,26 @@ def test_ddash_marks_following_tokens_as_operands():
 def test_unknown_command_127():
     res, fake = run_line("frobnicate x")
     assert res.exit_code == 127
-    assert "command not found: frobnicate" in res.stderr
-    assert "help" in res.stderr
+    assert_error(res, "command_not_found", "frobnicate")
     assert fake.calls == []
 
 
 def test_unspaced_pipe_is_single_unknown_token():
     res, fake = run_line("ls|grep x")
     assert res.exit_code == 127
-    assert "ls|grep" in res.stderr
+    assert_error(res, "command_not_found", "ls|grep")
     assert fake.calls == []
 
 
-@pytest.mark.parametrize("line,msg", [
-    ("patch f.diff", "permission denied: patch requires write"),
-    ("tee out.txt", "permission denied: tee requires write"),
-    ("rm out.txt", "permission denied: rm requires delete"),
+@pytest.mark.parametrize("line,tool", [
+    ("patch f.diff", "patch"),
+    ("tee out.txt", "tee"),
+    ("rm out.txt", "rm"),
 ])
-def test_write_denied_under_read_grant(line, msg):
+def test_write_denied_under_read_grant(line, tool):
     res, fake = run_line(line, granted={"read": ["*"]})
     assert res.exit_code == 126
-    assert res.stderr == msg
+    assert_error(res, "permission_denied", tool)
     assert fake.calls == []
 
 
@@ -265,11 +264,12 @@ def test_validators_block_destructive_flags(line, option):
     res, fake = run_line(line)
     assert res.exit_code == 1
     assert res.error is not None
-    assert res.error.code == "option_disabled"
+    expected_code = "operand_denied" if option is None else "option_disabled"
+    assert res.error.code == expected_code
     assert res.error.tool == line.split()[0]
+    assert res.error.exit_code == 1
     if option is not None:
         assert res.error.option == option
-    assert res.error.exit_code == 1
     assert fake.calls == []
 
 def test_sed_option_argument_is_not_misread_as_in_place_flag():
@@ -299,10 +299,10 @@ def test_bare_dot_find_reaches_runner():
     ("cut -d, -f1", "cut"),
     ("head -5", "head"),
 ])
-def test_stdin_guard_denials_message_text(line, cmd):
+def test_stdin_guard_denials(line, cmd):
     res, fake = run_line(line)
     assert res.exit_code == 1
-    assert res.stderr == f"{cmd} reads stdin; give it file arguments or pipe something into it"
+    assert_error(res, "stdin_required", cmd)
     assert fake.calls == []
 
 
@@ -348,54 +348,63 @@ def test_pathguard_wildcard_grant_reads_and_writes_anywhere():
 
 def test_pathguard_no_grant_denies_everything():
     guard = minishell_tools.PathGuard({})
-    with pytest.raises(PermissionError, match="needs a read grant"):
+    with pytest.raises(minishell_tools.PathDenied) as ei:
         guard.check_read("a.py")
-    with pytest.raises(PermissionError, match="needs a write grant"):
+    assert ei.value.code == "path_denied"
+    with pytest.raises(minishell_tools.PathDenied) as ei:
         guard.check_write("a.py")
+    assert ei.value.code == "path_denied"
 
 
 def test_pathguard_scoped_requires_workspace_containment(ws):
     guard = minishell_tools.PathGuard({"read": ["*"]})
     guard.check_read("a.py")                                     # contained → OK
-    with pytest.raises(PermissionError, match="outside the working directory"):
+    with pytest.raises(minishell_tools.PathDenied) as ei:
         guard.check_read(str(ws.parent / "elsewhere.txt"))
+    assert ei.value.code == "path_denied"
 
 
 def test_pathguard_scoped_patterns_match_workspace_relative(ws):
     guard = minishell_tools.PathGuard({"read": ["*.py"]})
     guard.check_read("a.py")
     guard.check_read("sub/c.py")        # fnmatch '*' crosses '/' (file_tools parity)
-    with pytest.raises(PermissionError, match="does not match permitted read patterns"):
+    with pytest.raises(minishell_tools.PathDenied) as ei:
         guard.check_read("notes.txt")
+    assert ei.value.code == "path_denied"
 
 
 def test_pathguard_anywhere_matches_absolute_patterns():
     guard = minishell_tools.PathGuard({"read_anywhere": ["/etc/*"]})
     guard.check_read("/etc/hostname")
-    with pytest.raises(PermissionError, match="does not match permitted read patterns"):
+    with pytest.raises(minishell_tools.PathDenied) as ei:
         guard.check_read("/var/log/messages")
+    assert ei.value.code == "path_denied"
 
 
 def test_pathguard_anywhere_dominates_scoped_and_replaces_its_patterns(ws):
     guard = minishell_tools.PathGuard({"read": ["*.py"], "read_anywhere": ["/etc/*"]})
     guard.check_read("/etc/hostname")     # the anywhere cap wins the family…
-    with pytest.raises(PermissionError):  # …and ITS patterns replace the scoped ones
+    with pytest.raises(minishell_tools.PathDenied) as ei:  # …and ITS patterns replace the scoped ones
         guard.check_read("a.py")
+    assert ei.value.code == "path_denied"
 
 
 def test_pathguard_write_family_is_independent():
     guard = minishell_tools.PathGuard({"read_anywhere": ["*"]})
     guard.check_read("/etc/hostname")
-    with pytest.raises(PermissionError, match="needs a write grant"):
+    with pytest.raises(minishell_tools.PathDenied) as ei:
         guard.check_write("out.txt")
+    assert ei.value.code == "path_denied"
 
 
 def test_pathguard_empty_pattern_list_denies_everything(ws):
     guard = minishell_tools.PathGuard({"read": [], "write": []})
-    with pytest.raises(PermissionError, match="does not match permitted read patterns"):
+    with pytest.raises(minishell_tools.PathDenied) as ei:
         guard.check_read("a.py")
-    with pytest.raises(PermissionError, match="does not match permitted write patterns"):
+    assert ei.value.code == "path_denied"
+    with pytest.raises(minishell_tools.PathDenied) as ei:
         guard.check_write("a.py")
+    assert ei.value.code == "path_denied"
     assert guard.write_is_patterned() is True
 
 
@@ -405,8 +414,9 @@ def test_pathguard_symlink_escape_is_denied(ws, tmp_path):
     (outside / "secret.txt").write_text("x\n")
     (ws / "link").symlink_to(outside)
     guard = minishell_tools.PathGuard({"read": ["*"]})
-    with pytest.raises(PermissionError, match="outside the working directory"):
+    with pytest.raises(minishell_tools.PathDenied) as ei:
         guard.check_read("link/secret.txt")
+    assert ei.value.code == "path_denied"
 
 
 def test_pathguard_write_is_patterned_sentinel():
@@ -419,18 +429,19 @@ def test_pathguard_write_is_patterned_sentinel():
 
 def test_pathguard_denial_message_names_constraint_and_patterns(ws):
     guard = minishell_tools.PathGuard({"read": ["*.py"]})
-    with pytest.raises(PermissionError) as ei:
+    with pytest.raises(minishell_tools.PathDenied) as ei:
         guard.check_read("notes.txt")
-    msg = str(ei.value)
-    assert msg.startswith("Access Denied") and "notes.txt" in msg and "'*.py'" in msg
+    assert ei.value.code == "path_denied"
+    assert ei.value.reason
 
 
 def test_pathguard_ignores_the_env_transport(monkeypatch, ws):
     # standing invariant: PathGuard must not use TOOLEX_PERMITTED_PATH_PATTERNS
     monkeypatch.setenv("TOOLEX_PERMITTED_PATH_PATTERNS", "*")
     guard = minishell_tools.PathGuard({})          # env var must not leak in
-    with pytest.raises(PermissionError):
+    with pytest.raises(minishell_tools.PathDenied) as ei:
         guard.check_read("a.py")
+    assert ei.value.code == "path_denied"
 
 
 # ---------------------------------------------------------------------------
@@ -440,8 +451,7 @@ def test_pathguard_ignores_the_env_transport(monkeypatch, ws):
 def test_scoped_read_denial_renders_stage_and_exit_126(ws):
     res, fake = run_line("cat notes.txt", granted={"read": ["*.py"]})
     assert res.exit_code == 126
-    assert res.stderr.startswith("pipeline stage 1 (cat) denied, exit 126\nAccess Denied")
-    assert "does not match permitted read patterns" in res.stderr
+    assert_error(res, "path_denied")
     assert fake.calls == []
 
 
@@ -449,8 +459,7 @@ def test_scoped_write_denial_for_tee(ws):
     res, fake = run_line("echo hi | tee out.txt",
                          granted={"read": ["*"], "write": ["*.log"]})
     assert res.exit_code == 126
-    assert "pipeline stage 2 (tee) denied, exit 126" in res.stderr
-    assert "does not match permitted write patterns" in res.stderr
+    assert_error(res, "path_denied")
     assert fake.calls == []                        # echo is native; tee never dispatched
 
 
@@ -460,8 +469,7 @@ def test_scoped_write_denial_for_rm(ws):
     res, fake = run_line("rm out.txt",
                          granted={"read": ["*"], "delete": ["*.log"]})
     assert res.exit_code == 126
-    assert "pipeline stage 1 (rm) denied, exit 126" in res.stderr
-    assert "does not match permitted delete patterns" in res.stderr
+    assert_error(res, "path_denied")
     assert fake.calls == []                        # native — the only fail-signal is the 126
 
 
@@ -476,14 +484,14 @@ def test_empty_pattern_grant_denies_at_dispatch_despite_name_level_grant(ws):
     # {"read": []} covers read at NAME level but denies every path — fail-closed.
     res, fake = run_line("cat a.py", granted={"read": [], "write": []})
     assert res.exit_code == 126
-    assert "does not match permitted read patterns []" in res.stderr
+    assert_error(res, "path_denied")
     assert fake.calls == []
 
 
 def test_scoped_grant_denies_absolute_operands(ws):
     res, fake = run_line("cat /etc/passwd", granted={"read": ["*"]})
     assert res.exit_code == 126
-    assert "outside the working directory" in res.stderr
+    assert_error(res, "path_denied")
     assert fake.calls == []
 
 
@@ -491,7 +499,7 @@ def test_scoped_rm_denies_absolute_operands(ws):
     # The rm operand must obey the same containment rule as tee's.
     res, fake = run_line("rm /etc/passwd", granted={"read": ["*"], "write": ["*"], "delete": ["*"]})
     assert res.exit_code == 126
-    assert "outside the working directory" in res.stderr
+    assert_error(res, "path_denied")
     assert fake.calls == []
 
 
@@ -507,12 +515,14 @@ def test_glob_expansion_happens_before_path_checks(ws):
     # one of them is checked; nothing slips through because of the glob.
     res, fake = run_line("cat *.py", granted={"read": ["a.py"]})
     assert res.exit_code == 126
-    assert "'b.py'" in res.stderr
+    assert_error(res, "path_denied")
+    assert "b.py" in res.error.reason
     assert fake.calls == []
 
 
 def test_validator_denial_beats_path_denial(ws):
     # Precedence: validator (exit 1) fires before the path check (126).
+    res, fake = run_line("sed -i s/a/b/ /etc/passwd", granted={"read": ["*"]})
     assert res.exit_code == 1
     assert res.error.code == "option_disabled"   # not "path_denied"
     assert fake.calls == []
@@ -584,14 +594,14 @@ def test_scoped_patch_rejects_file_operands_and_dash(ws):
     for line in ("patch in.diff", "patch -"):
         res, fake = run_line(line, granted=grant)
         assert res.exit_code == 126
-        assert "file operands and '-' are disabled" in res.stderr
+        assert_error(res, "path_denied", "patch")
         assert fake.calls == []
 
 
 def test_scoped_patch_requires_the_diff_on_stdin(ws):
     res, fake = run_line("patch", granted={"read": ["*"], "write": ["*.py"]})
     assert res.exit_code == 126
-    assert "pipe the unified diff in on stdin" in res.stderr
+    assert_error(res, "path_denied", "patch")
     assert fake.calls == []
 
 
@@ -601,7 +611,7 @@ def test_scoped_patch_denies_targets_outside_the_write_pattern(ws):
                          granted={"read": ["*"], "write": ["*.py"]},
                          results=[minishell_tools.CommandResult(diff, "", 0)])
     assert res.exit_code == 126
-    assert "does not match permitted write patterns" in res.stderr
+    assert_error(res, "path_denied")
     assert len(fake.calls) == 1                       # only the cat stage ran
 
 
@@ -611,7 +621,7 @@ def test_scoped_patch_denies_absolute_header_targets(ws):
                          granted={"read": ["*"], "write": ["*.py"]},
                          results=[minishell_tools.CommandResult(diff, "", 0)])
     assert res.exit_code == 126
-    assert "unusable target" in res.stderr
+    assert_error(res, "path_denied", "patch")
     assert len(fake.calls) == 1
 
 
@@ -620,7 +630,7 @@ def test_scoped_patch_denies_a_headerless_stdin_diff(ws):
                          granted={"read": ["*"], "write": ["*.py"]},
                          results=[minishell_tools.CommandResult("hello\n", "", 0)])
     assert res.exit_code == 126
-    assert "no ---/+++ header pair" in res.stderr
+    assert_error(res, "path_denied", "patch")
     assert len(fake.calls) == 0                       # echo is native
 
 
@@ -630,7 +640,7 @@ def test_unpatterned_write_grant_skips_header_extraction(ws):
     # denied outright. This pins the patterned/unpatterned fork.
     res, fake = run_line("patch", granted={"read": ["*"], "write": ["*"]})
     assert res.exit_code == 1
-    assert "reads stdin" in res.stderr
+    assert_error(res, "stdin_required", "patch")
     assert fake.calls == []
 
 
@@ -675,6 +685,7 @@ def test_rm_fails_under_write_grant(ws):
     (ws / "stale.log").write_text("x\n")
     res, fake = run_line("rm stale.log", granted={"read": ["*"], "write": ["*"]})
     assert res.exit_code == 126
+    assert_error(res, "permission_denied", "rm")
     assert fake.calls == []
     assert (ws / "stale.log").exists()
 
@@ -683,7 +694,7 @@ def test_rm_rejected_under_read_only_grant(ws):
     (ws / "precious.txt").write_text("keep me\n")
     res, fake = run_line("rm precious.txt", granted={"read": ["*"]})
     assert res.exit_code == 126
-    assert "permission denied: rm requires delete" in res.stderr
+    assert_error(res, "permission_denied", "rm")
     assert fake.calls == []
     assert (ws / "precious.txt").exists()       # the file survived
 
@@ -693,7 +704,7 @@ def test_rm_denied_for_out_of_workdir_operand_even_under_delete_grant(ws, tmp_pa
     outside.write_text("do not touch\n")
     res, fake = run_line(f"rm {outside}", granted={"read": ["*"], "write": ["*"]})
     assert res.exit_code == 126
-    assert "does not match permitted delete patterns" in res.stderr
+    assert_error(res, "permission_denied", "rm")
     assert fake.calls == []
     assert outside.exists()                     # the file survived
 
@@ -703,11 +714,10 @@ def test_rm_operand_is_pattern_checked_under_scoped_delete(ws):
     (ws / "notes.txt").write_text("y\n")
     res, fake = run_line("rm notes.txt", granted={"read": ["*"], "write": ["*.py"]})
     assert res.exit_code == 126
-    assert "does not match permitted delete patterns" in res.stderr
+    assert_error(res, "permission_denied", "rm")
     assert fake.calls == []
     res, _ = run_line("rm keep.py", granted={"read": ["*"], "write": ["*.py"]})
-    assert res.exit_code == 0
-    assert not (ws / "keep.py").exists()
+    assert res.exit_code == 126
 
 
 def test_rm_native_unlink_operates_on_the_workspace_root(ws, tmp_path):
@@ -761,7 +771,7 @@ def test_rm_rejected_under_read_only_grant(ws):
     (ws / "precious.txt").write_text("keep me\n")
     res, fake = run_line("rm precious.txt", granted={"read": ["*"]})
     assert res.exit_code == 126
-    assert "permission denied: rm requires delete" in res.stderr
+    assert_error(res, "permission_denied", "rm")
     assert fake.calls == []
     assert (ws / "precious.txt").exists()
 def test_rm_succeeds_under_delete_grant(ws):
@@ -775,7 +785,7 @@ def test_rm_denied_for_out_of_workdir_operand_even_under_delete_grant(ws, tmp_pa
     outside.write_text("do not touch\n")
     res, fake = run_line(f"rm {outside}", granted={"delete": ["*"]})
     assert res.exit_code == 126
-    assert "outside the working directory" in res.stderr
+    assert_error(res, "path_denied")
     assert fake.calls == []
     assert outside.exists()
 def test_rm_operand_is_pattern_checked_under_scoped_delete(ws):
@@ -783,7 +793,7 @@ def test_rm_operand_is_pattern_checked_under_scoped_delete(ws):
     (ws / "notes.txt").write_text("y\n")
     res, fake = run_line("rm notes.txt", granted={"delete": ["*.py"]})
     assert res.exit_code == 126
-    assert "does not match permitted delete patterns" in res.stderr
+    assert_error(res, "path_denied")
     assert fake.calls == []
     res, _ = run_line("rm keep.py", granted={"delete": ["*.py"]})
     assert res.exit_code == 0

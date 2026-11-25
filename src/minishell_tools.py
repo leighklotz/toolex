@@ -439,8 +439,8 @@ GUARD_CONFIGS = {
     ),
     "rm": GuardConfig(deny_all_options=True),
     "patch": GuardConfig(
-        banned_long={"strip", "directory", "output", "prefix", "suffix",
-                     "backup", "reject-file", "input"},
+        banned_long={"--strip", "--directory", "--output", "--prefix", "--suffix",
+                     "--backup", "--reject-file", "--input"},
         banned_short={"p", "b", "B", "d", "o", "z", "r", "i"}
     ),
 }
@@ -459,18 +459,33 @@ def _validate_args(rest, cmd_name):
         if tok == "--":
             break
         if config.deny_all_options and tok.startswith("-"):
-            raise ValueError(f"{cmd_name} options are disabled (single-file unlink only): {tok}")
-        if any(tok == b or (b.endswith("*") and tok.startswith(b[:-1]))
-               for b in config.banned_tokens):
-            raise ValueError(f"{cmd_name} token is disabled: {tok}")
+            raise OptionDisabled(
+                tool=cmd_name, option=tok,
+                reason=f"{cmd_name} options are disabled (single-file unlink only): {tok}")
+        matched_token = next(
+            (b for b in config.banned_tokens
+             if tok == b or (b.endswith("*") and tok.startswith(b[:-1]))),
+            None,
+        )
+        if matched_token is not None:
+            opt_root = (matched_token[:-1] if matched_token.endswith("*")
+                        else tok.split("=", 1)[0])
+            raise OptionDisabled(
+                tool=cmd_name, option=opt_root,
+                reason=f"{cmd_name} token is disabled: {tok}")
         if tok.startswith("--"):
             opt = tok.split("=", 1)[0]
             if any(opt.startswith(b) or b.startswith(opt) for b in config.banned_long):
-                raise ValueError(f"{cmd_name} option {opt} is disabled: {tok}")
+                raise OptionDisabled(
+                    tool=cmd_name, option=opt,
+                    reason=f"{cmd_name} option {opt} is disabled: {tok}")
         elif tok.startswith("-") and tok != "-":
             group = tok[1:]
-            if any(c in config.banned_short for c in group):
-                raise ValueError(f"{cmd_name} option is disabled: {tok}")
+            banned_char = next((c for c in group if c in config.banned_short), None)
+            if banned_char is not None:
+                raise OptionDisabled(
+                    tool=cmd_name, option=f"-{banned_char}",
+                    reason=f"{cmd_name} option is disabled: {tok}")
             # Skip argument for options known to take one, to keep positional count accurate
             for j, char in enumerate(group):
                 if char in config.options_with_args and j == len(group) - 1:
@@ -479,7 +494,9 @@ def _validate_args(rest, cmd_name):
         else:
             positionals += 1
             if config.max_positionals is not None and positionals > config.max_positionals:
-                raise ValueError(f"{cmd_name} output operands are disabled (read-only command)")
+                raise OperandDenied(
+                    tool=cmd_name,
+                    reason=f"{cmd_name} output operands are disabled (read-only command)")
         i += 1
 
 
@@ -614,7 +631,7 @@ class PathGuard:
     (TOOLEX_PERMITTED_PATH_PATTERNS is process-global and would collide
     across modules in one session).
 
-    check_read/check_write/check_delete raise PermissionError on violation
+    check_read/check_write/check_delete raise PathDenied on violation
     and return None on success, mirroring file_tools' check_permitted_path:
     the message names the violated constraint — missing grant, containment,
     or pattern — and lists the allowed patterns so the model can
@@ -675,15 +692,15 @@ class PathGuard:
         return None
 
     def check_read(self, path: str) -> None:
-        """Raise PermissionError unless `path` is within the read grant."""
+        """Raise PathDenied unless `path` is within the read grant."""
         self._check(path, self._read, "read")
 
     def check_write(self, path: str) -> None:
-        """Raise PermissionError unless `path` is within the write grant."""
+        """Raise PathDenied unless `path` is within the write grant."""
         self._check(path, self._write, "write")
 
     def check_delete(self, path: str) -> None:
-        """Raise PermissionError unless `path` is within the delete grant."""
+        """Raise PathDenied unless `path` is within the delete grant."""
         self._check(path, self._delete, "delete")
 
     def write_is_patterned(self) -> bool:
@@ -714,36 +731,35 @@ class PathGuard:
     def _check(self, path: str, scope: tuple[bool, tuple[str, ...]] | None,
                kind: str) -> None:
         if scope is None:
-            raise PermissionError(
-                f"Access Denied: {path!r} needs a {kind} grant; "
-                f"no {kind} capability is active this session")
+            raise PathDenied(
+                tool="shell",
+                reason=f"Access Denied: {path!r} needs a {kind} grant; "
+                       f"no {kind} capability is active this session")
         anywhere, patterns = scope
         p = Path(path)
         if not p.is_absolute():
-            # Relative operands are anchored at the workspace root: both
-            # runners pin a stage's cwd there (HostRunner cwd=, PodmanRunner
-            # --workdir /workspace). The toolex process CWD is NOT a valid
-            # base once TOOLEX_WORKSPACE_DIR is set.
             p = self._workdir / p
         try:
-            resolved = p.resolve()   # resolve() follows symlinks: escapes denied
-        except (OSError, ValueError) as e:   # e.g. embedded NUL byte
-            raise PermissionError(
-                f"Access Denied: cannot resolve {path!r}: {e}") from e
+            resolved = p.resolve()
+        except (OSError, ValueError) as e:
+            raise PathDenied(
+                tool="shell",
+                reason=f"Access Denied: cannot resolve {path!r}: {e}") from e
         if anywhere:
             candidate = resolved.as_posix()
         else:
-            # is_relative_to needs 3.9+; file_tools already relies on it.
             if not resolved.is_relative_to(self._workdir):
-                raise PermissionError(
-                    f"Access Denied: {path!r} resolves to {resolved.as_posix()!r}, "
-                    f"outside the working directory {self._workdir.as_posix()!r} "
-                    f"(workspace-scoped {kind} grant, patterns {sorted(patterns)})")
+                raise PathDenied(
+                    tool="shell",
+                    reason=f"Access Denied: {path!r} resolves to {resolved.as_posix()!r}, "
+                           f"outside the working directory {self._workdir.as_posix()!r} "
+                           f"(workspace-scoped {kind} grant, patterns {sorted(patterns)})")
             candidate = resolved.relative_to(self._workdir).as_posix()
         if not any(fnmatch.fnmatchcase(candidate, pat) for pat in patterns):
-            raise PermissionError(
-                f"Access Denied: {path!r} resolves to {candidate!r}, which does "
-                f"not match permitted {kind} patterns {sorted(patterns)}")
+            raise PathDenied(
+                tool="shell",
+                reason=f"Access Denied: {path!r} resolves to {candidate!r}, which does "
+                       f"not match permitted {kind} patterns {sorted(patterns)}")
 
 
 @dataclass(frozen=True)
@@ -1107,18 +1123,20 @@ class MiniShell:
         header extraction cannot see — so scoped patch takes the diff from
         stdin only, with no file operands."""
         if "-" in rest or _stage_paths(rest, spec, "read"):
-            raise PermissionError(
-                "patch: file operands and '-' are disabled under a patterned write "
-                "grant; pipe the unified diff in on stdin (targets are authorized "
-                "from the ---/+++ headers)")
+            raise PathDenied(
+                tool=spec.name,
+                reason="patch: file operands and '-' are disabled under a patterned write "
+                       "grant; pipe the unified diff in on stdin (targets are authorized "
+                       "from the ---/+++ headers)")
         if buffer is None:
-            raise PermissionError(
-                "patch: pipe the unified diff in on stdin so its target paths can "
-                "be authorized before dispatch")
+            raise PathDenied(
+                tool=spec.name,
+                reason="patch: pipe the unified diff in on stdin so its target paths can "
+                       "be authorized before dispatch")
         try:
             targets = _patch_target_paths(buffer)
         except ValueError as e:
-            raise PermissionError(f"patch: {e}") from None
+            raise PathDenied(tool=spec.name, reason=f"patch: {e}") from None
         for t in targets:
             self._guard.check_write(t)
 
@@ -1149,30 +1167,39 @@ class MiniShell:
             spec = self._reg.get(name)
             if spec is None:
                 lines = [f"command not found: {name}; run help to list all commands:", "$ help"]
-                return CommandResult("", "\n".join(lines), 127)
+                reason = "\n".join(lines)
+                err = ToolError(code="command_not_found", tool=name,
+                                reason=reason, exit_code=127)
+                return CommandResult("", reason, 127, error=err)
             if not _allowed(spec, self._grant):
-                return CommandResult("", f"permission denied: {name} requires "
-                                         f"{' '.join(sorted(spec.caps))}", 126)
+                reason = f"permission denied: {name} requires " \
+                         f"{' '.join(sorted(spec.caps))}"
+                err = ToolError(code="permission_denied", tool=name,
+                                reason=reason, exit_code=126)
+                return CommandResult("", reason, 126, error=err)
             if spec.validate:
                 try:
                     spec.validate(rest)
-                except ValueError as e:
-                    return CommandResult("", f"{name}: {e}", 1)
+                except ToolError as e:
+                    return CommandResult("", f"{name}: {e}", 1, error=e)
             rest, redirects = _extract_redirects(rest)
             try:
                 self._check_stage_paths(spec, rest, buffer)
-            except PermissionError as e:
+            except ToolError as e:
                 fail_msg = f"pipeline stage {i} ({name}) denied, exit 126\n{e}"
                 emit_invocation("❌️", fail_msg)
-                return CommandResult("", fail_msg, 126)
+                return CommandResult("", fail_msg, 126, error=e)
             if spec.native:
                 res = _call(spec.func, rest, buffer)
             else:
                 if (spec.consumes_stdin and buffer is None
                         and not _stage_paths(rest, spec, "read")
                         and not _stage_paths(rest, spec, "write")):
-                    return CommandResult("", f"{name} reads stdin; give it file arguments "
-                                             f"or pipe something into it", 1)
+                    reason = (f"{name} reads stdin; give it file arguments "
+                              f"or pipe something into it")
+                    err = ToolError(code="stdin_required", tool=name,
+                                    reason=reason, exit_code=1)
+                    return CommandResult("", reason, 1, error=err)
                 res = self._runner.run([*spec.argv, *rest], buffer, spec.caps, redirects)
             if not res.is_success:
                 return CommandResult(res.stdout,

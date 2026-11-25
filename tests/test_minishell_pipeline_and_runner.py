@@ -206,10 +206,11 @@ def test_podman_runner_attaches_piped_stdin(tmp_path, monkeypatch, fake_proc):
 def _read_grant_shell():
     # The guard is built HERE so it snapshots the SANDBOX_CONFIG
     # host_data_dir the calling test has just monkeypatched.
-    guard = minishell_tools.PathGuard({"read": ["*"]})
-    return minishell_tools.MiniShell(minishell_tools._REGISTRY,
-                                     minishell_tools.HostRunner(),
-                                     {"read": ["*"]}, guard)
+    grant = minishell_tools._as_grant({"read": ["*"]})
+    guard = minishell_tools.PathGuard(grant)
+    ctx = minishell_tools.SessionContext(grant=grant, guard=guard,
+                                         runner=minishell_tools.HostRunner())
+    return minishell_tools.MiniShell(minishell_tools._REGISTRY, ctx)
 
 
 @pytest.mark.parametrize("script", [

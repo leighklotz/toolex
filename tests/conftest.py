@@ -111,6 +111,14 @@ class FakeRunner:
         return minishell_tools.CommandResult("", "", 0)
 
 
+def assert_error(res, code, tool=None):
+    assert res.error is not None
+    assert res.error.code == code
+    assert res.exit_code == res.error.exit_code
+    if tool:
+        assert res.error.tool == tool
+
+
 def run_error(line, **kw):
     res, fake = run_line(line, **kw)
     assert res.error is not None
